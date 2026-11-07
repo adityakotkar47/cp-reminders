@@ -1,0 +1,7 @@
+{
+  "rules": [
+    { "platform": "LeetCode", "startsBeforeIST": "12:00", "text": "morning contests build discipline" },
+    { "platform": "Atcoder", "eventMatches": "Beginner Contest", "text": "Best CP platform, so highly recommended." }
+  ],
+  "overrides": {}
+}

@@ -1,0 +1,21 @@
+{
+  "include": {
+    "Codeforces": [
+      "Codeforces Round",
+      "Global Round"
+    ],
+    "Codechef": [
+      "^Starters"
+    ],
+    "LeetCode": [
+      "^(Weekly|Biweekly) Contest"
+    ],
+    "Atcoder": [
+      "AtCoder Beginner Contest"
+    ]
+  },
+  "maxDurationHours": 5,
+  "mergeCodeforcesDivs": true,
+  "leadMinutes": 75,
+  "minLeadMinutes": 10
+}
