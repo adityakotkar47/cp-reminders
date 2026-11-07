@@ -27,7 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir state
-          git -C state init --quiet
+          git -C state init --quiet --initial-branch=state
           git -C state remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
           auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
           if git -C state -c "http.extraheader=AUTHORIZATION: basic ${auth}" fetch --quiet --depth=1 origin state; then
