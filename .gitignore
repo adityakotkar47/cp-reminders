@@ -1,0 +1,10 @@
+.env
+.env.*
+node_modules/
+*.db
+*.db-*
+session.db*
+/state/
+.wrangler/
+.claude/
+dist/
