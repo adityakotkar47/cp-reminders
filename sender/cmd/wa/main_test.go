@@ -1,0 +1,294 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"go.mau.fi/whatsmeow/types"
+
+	"cp-reminders/sender/internal/outbox"
+	"cp-reminders/sender/internal/state"
+)
+
+func envMap(m map[string]string) func(string) string {
+	return func(k string) string { return m[k] }
+}
+
+func testIdentity(t *testing.T) string {
+	t.Helper()
+	id, _, err := state.GenerateIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func TestRunRejectsUnknownOrMissingCommand(t *testing.T) {
+	for _, args := range [][]string{nil, {"nope"}} {
+		var out strings.Builder
+		err := run(context.Background(), args, envMap(nil), &out)
+		if !errors.Is(err, errUsage) {
+			t.Errorf("run(%v): got %v, want errUsage", args, err)
+		}
+	}
+}
+
+func TestKeygenPrintsUsableIdentityAndRecipient(t *testing.T) {
+	var out strings.Builder
+	if err := run(context.Background(), []string{"keygen"}, envMap(nil), &out); err != nil {
+		t.Fatalf("keygen: %v", err)
+	}
+	var identity, recipient string
+	for _, line := range strings.Split(out.String(), "\n") {
+		if r, ok := strings.CutPrefix(line, "# public key: "); ok {
+			recipient = r
+		}
+		if strings.HasPrefix(line, "AGE-SECRET-KEY-1") {
+			identity = line
+		}
+	}
+	v, err := state.NewVault(identity)
+	if err != nil {
+		t.Fatalf("printed identity does not parse: %v\n%s", err, out.String())
+	}
+	if v.Recipient() != recipient {
+		t.Errorf("recipient %q does not match identity (%q)", recipient, v.Recipient())
+	}
+}
+
+type fakeWorker struct {
+	t      *testing.T
+	items  []outbox.Item
+	mu     sync.Mutex
+	claims int
+	acks   []outbox.AckRequest
+	srv    *httptest.Server
+}
+
+func newFakeWorker(t *testing.T, items ...outbox.Item) *fakeWorker {
+	f := &fakeWorker{t: t, items: items}
+	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer tok" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		switch r.URL.Path {
+		case "/outbox/claim":
+			f.claims++
+			json.NewEncoder(w).Encode(outbox.ClaimResponse{Items: f.items})
+		case "/outbox/ack":
+			var req outbox.AckRequest
+			json.NewDecoder(r.Body).Decode(&req)
+			f.acks = append(f.acks, req)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(f.srv.Close)
+	return f
+}
+
+func (f *fakeWorker) env(t *testing.T, extra map[string]string) func(string) string {
+	m := map[string]string{
+		envWorkerURL:   f.srv.URL,
+		envSenderToken: "tok",
+		envIdentity:    testIdentity(t),
+		envAnnounceJID: "120363000000000001@g.us",
+	}
+	for k, v := range extra {
+		m[k] = v
+	}
+	return envMap(m)
+}
+
+func TestDrainRequiresEnvironment(t *testing.T) {
+	err := run(context.Background(), []string{"drain", "--state", t.TempDir()}, envMap(nil), io.Discard)
+	if err == nil {
+		t.Fatal("drain succeeded without environment")
+	}
+	for _, name := range []string{envWorkerURL, envSenderToken, envIdentity, envAnnounceJID} {
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("error does not mention %s: %v", name, err)
+		}
+	}
+}
+
+func TestDrainRequiresStateFlag(t *testing.T) {
+	f := newFakeWorker(t)
+	err := run(context.Background(), []string{"drain"}, f.env(t, nil), io.Discard)
+	if !errors.Is(err, errUsage) {
+		t.Fatalf("got %v, want errUsage", err)
+	}
+	if f.claims != 0 {
+		t.Error("claimed without --state")
+	}
+}
+
+func TestDrainRejectsBadConfigBeforeClaim(t *testing.T) {
+	for name, extra := range map[string]map[string]string{
+		"bad jid":      {envAnnounceJID: "919999999999@s.whatsapp.net"},
+		"bad identity": {envIdentity: "AGE-SECRET-KEY-1BOGUS"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeWorker(t)
+			err := run(context.Background(), []string{"drain", "--state", t.TempDir()}, f.env(t, extra), io.Discard)
+			if err == nil {
+				t.Fatal("drain succeeded")
+			}
+			if strings.Contains(err.Error(), "BOGUS") {
+				t.Errorf("error leaks identity: %v", err)
+			}
+			if f.claims != 0 {
+				t.Error("claimed despite bad config")
+			}
+		})
+	}
+}
+
+func TestDrainEmptyOutboxDoesNotTouchState(t *testing.T) {
+	f := newFakeWorker(t)
+	dir := t.TempDir()
+	var out strings.Builder
+	if err := run(context.Background(), []string{"drain", "--state", dir}, f.env(t, nil), &out); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if f.claims != 1 || len(f.acks) != 0 {
+		t.Errorf("claims=%d acks=%d", f.claims, len(f.acks))
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 0 {
+		t.Errorf("state dir modified: %v", entries)
+	}
+	if !strings.Contains(out.String(), "outbox empty") {
+		t.Errorf("output: %s", out.String())
+	}
+}
+
+func TestDrainWithoutSessionAcksFailedAndWritesSummary(t *testing.T) {
+	f := newFakeWorker(t, outbox.Item{Key: "k1", Text: "Codeforces Round starts in 75 min", StartUTC: "2026-11-07T14:35:00Z", DeadlineUTC: "2026-11-07T14:25:00Z"})
+	summaryPath := filepath.Join(t.TempDir(), "summary.md")
+	env := f.env(t, map[string]string{envStepSummary: summaryPath})
+	err := run(context.Background(), []string{"drain", "--state", t.TempDir(), "--jitter", "0s"}, env, io.Discard)
+	if !errors.Is(err, state.ErrNoSession) {
+		t.Fatalf("drain: got %v, want ErrNoSession", err)
+	}
+	if len(f.acks) != 1 || len(f.acks[0].Results) != 1 || f.acks[0].Results[0].Status != outbox.StatusFailed {
+		t.Fatalf("acks: %+v", f.acks)
+	}
+	data, rerr := os.ReadFile(summaryPath)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if !strings.Contains(string(data), "Codeforces Round starts in 75 min") {
+		t.Errorf("summary:\n%s", data)
+	}
+}
+
+func TestAllowNonAnnounce(t *testing.T) {
+	for v, want := range map[string]bool{"1": true, "": false, "0": false, "true": false, "yes": false} {
+		if got := allowNonAnnounce(envMap(map[string]string{envAllowNonAnnounce: v})); got != want {
+			t.Errorf("ALLOW_NON_ANNOUNCE=%q: got %v, want %v", v, got, want)
+		}
+	}
+}
+
+func TestPairRefusesExistingSessionWithoutForce(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, state.SessionFile), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := envMap(map[string]string{envIdentity: testIdentity(t)})
+	err := run(context.Background(), []string{"pair", "--state", dir}, env, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("pair: got %v", err)
+	}
+}
+
+func TestCommandsRequireIdentity(t *testing.T) {
+	for _, cmd := range []string{"pair", "groups"} {
+		err := run(context.Background(), []string{cmd, "--state", t.TempDir()}, envMap(nil), io.Discard)
+		if err == nil || !strings.Contains(err.Error(), envIdentity) {
+			t.Errorf("%s: got %v", cmd, err)
+		}
+	}
+}
+
+func TestGroupsWithoutSession(t *testing.T) {
+	env := envMap(map[string]string{envIdentity: testIdentity(t)})
+	err := run(context.Background(), []string{"groups", "--state", t.TempDir()}, env, io.Discard)
+	if !errors.Is(err, state.ErrNoSession) {
+		t.Fatalf("groups: got %v, want ErrNoSession", err)
+	}
+}
+
+func TestWriteGroupTable(t *testing.T) {
+	self := types.NewADJID("919999999999", 0, 5)
+	community := types.NewJID("120363000000000000", types.GroupServer)
+	announce := types.NewJID("120363000000000001", types.GroupServer)
+	other := types.NewJID("120363000000000002", types.GroupServer)
+
+	parent := &types.GroupInfo{JID: community}
+	parent.Name = "CP Community"
+	parent.IsParent = true
+
+	ann := &types.GroupInfo{JID: announce, Participants: []types.GroupParticipant{{JID: self.ToNonAD(), IsAdmin: true}}}
+	ann.Name = "CP Community"
+	ann.IsDefaultSubGroup = true
+	ann.LinkedParentJID = community
+	ann.IsAnnounce = true
+
+	sub := &types.GroupInfo{JID: other, Participants: []types.GroupParticipant{{JID: self.ToNonAD()}}}
+	sub.Name = "General"
+	sub.LinkedParentJID = community
+
+	var b strings.Builder
+	if err := writeGroupTable(&b, []*types.GroupInfo{parent, ann, sub}, []types.JID{self}); err != nil {
+		t.Fatal(err)
+	}
+	got := b.String()
+	for _, want := range []string{"JID", "NAME", "PARENT", "DEFAULT_SUB", "LINKED_PARENT", "ANNOUNCE", "ADMIN", "General"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("table missing %q:\n%s", want, got)
+		}
+	}
+	candidates := 0
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(line, "ANNOUNCEMENTS CANDIDATE:") {
+			candidates++
+			if !strings.Contains(line, announce.String()) || !strings.Contains(line, "admin=yes") {
+				t.Errorf("candidate line: %q", line)
+			}
+		}
+	}
+	if candidates != 1 {
+		t.Errorf("candidate lines: got %d, want 1\n%s", candidates, got)
+	}
+	annRow := rowFor(got, announce.String())
+	if !strings.Contains(annRow, "yes") || !strings.Contains(annRow, community.String()) {
+		t.Errorf("announcements row: %q", annRow)
+	}
+	if subRow := rowFor(got, other.String()); strings.Count(subRow, "yes") != 0 {
+		t.Errorf("sub-group row should have no yes flags: %q", subRow)
+	}
+}
+
+func rowFor(table, jid string) string {
+	for _, line := range strings.Split(table, "\n") {
+		if strings.HasPrefix(line, jid) {
+			return line
+		}
+	}
+	return ""
+}

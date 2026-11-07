@@ -11,8 +11,11 @@ import (
 	"time"
 )
 
-// MaxLedgerEntries is the number of most recent entries kept in sent.json.
-const MaxLedgerEntries = 500
+// Ledger file name and size.
+const (
+	LedgerFile       = "sent.json"
+	MaxLedgerEntries = 500
+)
 
 // Entry records one delivered reminder.
 type Entry struct {

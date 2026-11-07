@@ -35,6 +35,9 @@ func NewClient(dev *store.Device, log waLog.Logger) *Client {
 // Err returns the first fatal event seen, if any.
 func (c *Client) Err() error { return c.w.Err() }
 
+// Done is closed when a fatal event is seen.
+func (c *Client) Done() <-chan struct{} { return c.w.Done() }
+
 // ConnectAndWait connects and waits until the client is logged in.
 // ctx also bounds the lifetime of the connection's background loops.
 func (c *Client) ConnectAndWait(ctx context.Context, timeout time.Duration) error {
