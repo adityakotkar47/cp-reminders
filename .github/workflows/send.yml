@@ -68,7 +68,9 @@ jobs:
             exit 0
           fi
           git checkout --quiet --orphan next
-          git add -- session.db.age sent.json
+          files=()
+          for f in session.db.age sent.json; do [ -e "$f" ] && files+=("$f"); done
+          git add -- "${files[@]}"
           git -c user.name="github-actions[bot]" \
               -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
               commit --quiet -m "state"
