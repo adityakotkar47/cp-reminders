@@ -53,3 +53,54 @@ export async function resetDb(): Promise<void> {
     ["contest_snapshot", "reminders", "tip_overrides", "meta"].map((table) => env.DB.prepare(`DELETE FROM ${table}`)),
   );
 }
+
+export interface ReminderRow {
+  key: string;
+  resource_id: number;
+  href: string;
+  start_utc: string;
+  deadline_utc: string;
+  text: string;
+  status: string;
+  attempts: number;
+  claim_id: string | null;
+  claimed_at: string | null;
+  message_id: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+  sent_at: string | null;
+}
+
+export async function seedReminder(overrides: Partial<ReminderRow> & { key: string }): Promise<void> {
+  const row: ReminderRow = {
+    resource_id: 2,
+    href: `https://example.test/${overrides.key}`,
+    start_utc: new Date(NOW + 70 * MIN).toISOString(),
+    deadline_utc: new Date(NOW + 60 * MIN).toISOString(),
+    text: `text for ${overrides.key}`,
+    status: "queued",
+    attempts: 0,
+    claim_id: null,
+    claimed_at: null,
+    message_id: null,
+    last_error: null,
+    created_at: new Date(NOW).toISOString(),
+    updated_at: new Date(NOW).toISOString(),
+    sent_at: null,
+    ...overrides,
+  };
+  await env.DB.prepare(
+    "INSERT INTO reminders (key, resource_id, href, start_utc, deadline_utc, text, status, attempts, claim_id, claimed_at, message_id, last_error, created_at, updated_at, sent_at) " +
+      "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+  )
+    .bind(
+      row.key, row.resource_id, row.href, row.start_utc, row.deadline_utc, row.text, row.status, row.attempts,
+      row.claim_id, row.claimed_at, row.message_id, row.last_error, row.created_at, row.updated_at, row.sent_at,
+    )
+    .run();
+}
+
+export async function getReminder(key: string): Promise<ReminderRow | null> {
+  return env.DB.prepare("SELECT * FROM reminders WHERE key = ?1").bind(key).first<ReminderRow>();
+}
