@@ -9,7 +9,7 @@
     {
       "binding": "DB",
       "database_name": "cp-reminders",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "database_id": "27151c8f-c41c-47e8-b60b-250ebf43cfad",
       "migrations_dir": "migrations"
     }
   ],
