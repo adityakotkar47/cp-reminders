@@ -119,6 +119,7 @@ stateDiagram-v2
   claimed --> queued: lease expired
   queued --> expired: now > deadline
   claimed --> expired: lease expired and now > deadline
+  expired --> sent: late ack "sent" with matching claimId (message was in flight)
   sent --> [*]
   failed --> [*]
   expired --> [*]
@@ -179,7 +180,7 @@ All bodies are JSON. Auth is `Authorization: Bearer <token>`.
 ## Flows
 
 ### Tick (every 5 minutes, from two independent triggers)
-
+1. If the snapshot is older than 60 minutes, fetch clist. On error or an empty result, fall back to the Codeforces API, which replaces only the Codeforces contests and keeps the still-upcoming contests of other platforms from the previous snapshot. `last_fetch_error` records the clist failure even when the fallback succeeds, so `/health` shows the degraded state. If both fail, keep the old snapshot.
 1. If the snapshot is older than 60 minutes, fetch clist. On error or an empty result, fall back to the Codeforces API. If both fail, keep the old snapshot and record `last_fetch_error`.
 2. Compute due contests with `dueReminders(snapshot, rules, now)`. For each one, render the text and run `INSERT … ON CONFLICT(key) DO NOTHING` as `queued`.
 3. Expire `queued`/`claimed` rows past their deadline.
