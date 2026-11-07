@@ -223,7 +223,7 @@ sequenceDiagram
 | Dispatch fails (GitHub API) | Sender not woken | `last_wake_at` is not updated, so the next tick retries. |
 | Run cancelled while pending | None | The outbox still holds the rows, and the next run drains them. |
 | Two runs at once | Prevented | Concurrency group `wa-session`. A single live socket is also a ban-risk requirement. |
-| Sent but ack lost | Possible duplicate | `sent.json` check, then ack as sent on the next claim. |
+| Sent but ack lost | Possible duplicate | `sent.json` check, then ack as sent on the next claim. If the deadline passes before that claim, the row ends `expired` although the message was delivered; `sent.json` on the `state` branch is the record of truth for delivery. |
 | WhatsApp logged out, or the device was removed | Nothing can be sent | The sender fails the job: GitHub emails, and the job summary lists the claimed texts. Rows return to `queued` and expire at the deadline. Fix with `wa pair`. |
 | Contest rescheduled | Start changes | New key gives a new reminder. A reminder already sent for the old time is not retracted. |
 | Placeholder name at queue time | Generic name posted | Accepted. The snapshot refreshes hourly, so this is rare. |
