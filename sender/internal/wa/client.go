@@ -1,0 +1,122 @@
+package wa
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/store"
+	"go.mau.fi/whatsmeow/types"
+	waLog "go.mau.fi/whatsmeow/util/log"
+	"google.golang.org/protobuf/proto"
+)
+
+// PairDisplayName is the browser/OS label sent with phone-number pairing;
+// the server only accepts common "Browser (OS)" values.
+const PairDisplayName = "Chrome (Linux)"
+
+// Client is a whatsmeow client that records fatal connection events.
+type Client struct {
+	*whatsmeow.Client
+	w *watcher
+}
+
+// NewClient returns a Client for dev.
+func NewClient(dev *store.Device, log waLog.Logger) *Client {
+	cli := whatsmeow.NewClient(dev, log)
+	w := newWatcher()
+	cli.AddEventHandler(w.handle)
+	return &Client{Client: cli, w: w}
+}
+
+// Err returns the first fatal event seen, if any.
+func (c *Client) Err() error { return c.w.Err() }
+
+// ConnectAndWait connects and waits until the client is logged in.
+// ctx also bounds the lifetime of the connection's background loops.
+func (c *Client) ConnectAndWait(ctx context.Context, timeout time.Duration) error {
+	if err := c.ConnectContext(ctx); err != nil {
+		return fmt.Errorf("connect: %w", err)
+	}
+	if err := c.WaitConnected(ctx, timeout); err != nil {
+		c.Disconnect()
+		return err
+	}
+	return nil
+}
+
+// WaitConnected waits for the next Connected event or a fatal event.
+func (c *Client) WaitConnected(ctx context.Context, timeout time.Duration) error {
+	return c.w.waitConnected(ctx, timeout)
+}
+
+// SelfJIDs returns the device's phone-number JID and LID, when known.
+func (c *Client) SelfJIDs() []types.JID {
+	var ids []types.JID
+	if c.Store.ID != nil {
+		ids = append(ids, *c.Store.ID)
+	}
+	if !c.Store.LID.IsEmpty() {
+		ids = append(ids, c.Store.LID)
+	}
+	return ids
+}
+
+// SendText sends text as a plain conversation message.
+func (c *Client) SendText(ctx context.Context, to types.JID, text string) (types.MessageID, error) {
+	if err := c.Err(); err != nil {
+		return "", err
+	}
+	resp, err := c.SendMessage(ctx, to, &waE2E.Message{Conversation: proto.String(text)})
+	if err != nil {
+		return "", fmt.Errorf("send message: %w", errors.Join(err, c.Err()))
+	}
+	return resp.ID, nil
+}
+
+// PairQR links a new device by QR code, calling show for every code.
+func (c *Client) PairQR(ctx context.Context, show func(code string)) error {
+	ch, err := c.startPairing(ctx)
+	if err != nil {
+		return err
+	}
+	return pairLoop(ctx, ch, func(code string) error {
+		show(code)
+		return nil
+	})
+}
+
+// PairWithPhone links a new device with an 8-character code entered on the phone.
+func (c *Client) PairWithPhone(ctx context.Context, phone string, show func(code string)) error {
+	ch, err := c.startPairing(ctx)
+	if err != nil {
+		return err
+	}
+	requested := false
+	return pairLoop(ctx, ch, func(string) error {
+		if requested {
+			return nil
+		}
+		requested = true
+		code, err := c.PairPhone(ctx, phone, true, whatsmeow.PairClientChrome, PairDisplayName)
+		if err != nil {
+			return fmt.Errorf("%w: request pairing code: %w", ErrPairing, err)
+		}
+		show(code)
+		return nil
+	})
+}
+
+func (c *Client) startPairing(ctx context.Context) (<-chan whatsmeow.QRChannelItem, error) {
+	ch, err := c.GetQRChannel(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrPairing, err)
+	}
+	if err := c.ConnectContext(ctx); err != nil {
+		return nil, fmt.Errorf("connect: %w", err)
+	}
+	return ch, nil
+}
