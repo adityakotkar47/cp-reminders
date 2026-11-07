@@ -1,0 +1,77 @@
+name: send
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: wa-session
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  drain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Fetch state branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir state
+          git -C state init --quiet
+          git -C state remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          if git -C state -c "http.extraheader=AUTHORIZATION: basic ${auth}" fetch --quiet --depth=1 origin state; then
+            git -C state checkout --quiet -B state FETCH_HEAD
+            echo "STATE_SHA=$(git -C state rev-parse HEAD)" >> "$GITHUB_ENV"
+          else
+            echo "state branch not found, starting empty"
+            git -C state checkout --quiet --orphan state
+            echo "STATE_SHA=" >> "$GITHUB_ENV"
+          fi
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: sender/go.mod
+          cache: true
+          cache-dependency-path: sender/go.sum
+
+      - name: Drain the outbox
+        working-directory: sender
+        env:
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          SENDER_TOKEN: ${{ secrets.SENDER_TOKEN }}
+          AGE_IDENTITY: ${{ secrets.AGE_IDENTITY }}
+          ANNOUNCE_JID: ${{ secrets.ANNOUNCE_JID }}
+        run: go run ./cmd/wa drain --state "$GITHUB_WORKSPACE/state"
+
+      - name: Persist state
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [ -d state/.git ] || exit 0
+          cd state
+          if [ -z "$(git status --porcelain -- session.db.age sent.json)" ]; then
+            echo "state unchanged"
+            exit 0
+          fi
+          git checkout --quiet --orphan next
+          git add -- session.db.age sent.json
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit --quiet -m "state"
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c "http.extraheader=AUTHORIZATION: basic ${auth}" \
+              push --force-with-lease="state:${STATE_SHA}" origin next:refs/heads/state
