@@ -53,8 +53,8 @@ Runs on push and pull request with `permissions: contents: read` and a concurren
 
 | Job | Steps |
 |---|---|
-| `core` | `npm ci`, `npm test`, `npm run typecheck` at the repository root. |
-| `worker` | In `worker/`: `npm ci`, `npm run typecheck`, `npm test` (the Workers runtime with a local D1). |
+| `core` | `pnpm/setup` (installs Node 24, pnpm from `packageManager`, and the workspace), then `pnpm test`, `pnpm typecheck`. |
+| `worker` | `pnpm/setup`, then `pnpm --filter cp-reminders-worker typecheck` and `test` (the Workers runtime with a local D1). |
 | `sender` | In `sender/`: `go vet ./...`, `go test ./...`. |
 
 Neither workflow needs a secret to run CI.

@@ -103,16 +103,16 @@ Bundle size from `wrangler deploy --dry-run --outdir dist` is about 16 KiB (6 Ki
 All commands run in `worker/`. Nothing here is done by the build agent; it needs your Cloudflare and GitHub accounts.
 
 ```sh
-npm ci
-npx wrangler login
-npx wrangler d1 create cp-reminders
+pnpm install
+pnpm exec wrangler login
+pnpm exec wrangler d1 create cp-reminders
 ```
 
 Copy the printed `database_id` into `d1_databases[0].database_id` in `wrangler.jsonc`. Check `vars.GH_REPO` (`owner/repo` of this repository). Then:
 
 ```sh
-npm run db:migrate:remote       # wrangler d1 migrations apply cp-reminders --remote
-npm run deploy
+pnpm run db:migrate:remote       # wrangler d1 migrations apply cp-reminders --remote
+pnpm run deploy
 ```
 
 Secrets (`wrangler secret put <NAME>`; each prompts for the value). Generate the three random tokens with `openssl rand -hex 32` and keep them distinct.
@@ -142,10 +142,10 @@ curl -X POST -H "Authorization: Bearer $TICK_TOKEN" "$BASE/tick"
 ## Development
 
 ```sh
-npm run typecheck   # wrangler types (generates worker-configuration.d.ts), then tsc --noEmit
-npm test            # wrangler types, then vitest in the Workers runtime with a real local D1
-npm run bundle      # wrangler deploy --dry-run --outdir dist
-npm run dev         # wrangler dev --test-scheduled
+pnpm run typecheck   # wrangler types (generates worker-configuration.d.ts), then tsc --noEmit
+pnpm test           # wrangler types, then vitest in the Workers runtime with a real local D1
+pnpm run bundle      # wrangler deploy --dry-run --outdir dist
+pnpm run dev         # wrangler dev --test-scheduled
 ```
 
 Tests use [`@cloudflare/vitest-plugin`](https://developers.cloudflare.com/workers/testing/vitest-integration/get-started/write-your-first-test/) (the successor of the deprecated `@cloudflare/vitest-pool-workers`) with Vitest 4. Migrations from `migrations/` are applied to the test D1 in `test/setup.ts`. Outbound HTTP is replaced by an injected fetcher (unit tests) or by spying on `globalThis.fetch` (route tests); no test touches the network. The compatibility date in `wrangler.jsonc` is `2026-11-01`, which is later than the plugin's minimum of `2022-10-31` and not later than the installed workerd supports.

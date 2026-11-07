@@ -50,17 +50,17 @@ Configured in `config/tips.json`. Tips are optional; most reminders have none.
 - `rules`: checked in order, first match wins. Each may constrain `platform`, `startsBeforeIST` (`"12:00"` = morning contests) and `eventMatches` (regex on the name).
 - `overrides`: contest link → tip text for a single contest. An empty string suppresses the tip for that contest.
 
-The scheduler also merges a `tip_overrides` value from its KV store, so a one-off tip can be set without a redeploy (see `docs/scheduler.md`).
+The scheduler also merges one-off tips from its D1 `tip_overrides` table, set with `PUT /tips` without a redeploy (see `docs/scheduler.md`).
 
 ## Tests
 
-`npm test` runs `test/format.test.ts` against real clist data in `fixtures/`:
+`pnpm test` runs `test/format.test.ts` against real clist data in `fixtures/`:
 
 - Golden test: the bot's output is compared with every manual reminder in `fixtures/history.json`. 29 match byte-for-byte. The other 5 are manual mistakes the bot gets right (three contests delayed to 8:15 PM but posted with the old time, one wrong link pasted, one name typo); they are listed in the test as known manual errors.
 - Every contest that was posted manually is selected by the rules.
 - Noise is dropped (Div. 1 twin, Monday Munch, Placement Prep, Kotlin practice, heuristic contests).
 - Due-window, reschedule-key and tip-override behaviour.
 
-`npm run typecheck` runs `tsc` in strict mode.
+`pnpm typecheck` runs `tsc` in strict mode.
 
-Refreshing fixtures: `npm run fetch-fixtures` (needs `CLIST_USERNAME` and `CLIST_API_KEY` in `.env`). `fixtures/history.json` was produced by `node scripts/extract-history.mjs <WhatsApp chat export .txt>` and contains only the reminder posts.
+Refreshing fixtures: `pnpm fetch-fixtures` (needs `CLIST_USERNAME` and `CLIST_API_KEY` in `.env`). `fixtures/history.json` was produced by `node scripts/extract-history.mjs <WhatsApp chat export .txt>` and contains only the reminder posts.
