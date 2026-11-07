@@ -1,5 +1,6 @@
 import { adminRoutes } from "./admin.ts";
 import type { Env } from "./env.ts";
+import { healthRoute } from "./health.ts";
 import { json, text } from "./http.ts";
 import { outboxRoutes } from "./outbox.ts";
 import { type Route, route } from "./router.ts";
@@ -8,6 +9,7 @@ import { runTick } from "./tick.ts";
 const fetcher = (input: string, init?: RequestInit) => fetch(input, init);
 
 const routes: Route[] = [
+  healthRoute,
   {
     method: "POST",
     path: "/tick",
