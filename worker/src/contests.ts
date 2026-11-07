@@ -7,6 +7,7 @@ export type Source = "clist" | "codeforces";
 export interface SnapshotResult {
   contests: Contest[];
   fetched: boolean;
+  error?: string;
 }
 
 export const SNAPSHOT_TTL_MS = 60 * 60_000;
@@ -121,9 +122,10 @@ export async function ensureSnapshot(env: Env, nowMs: number, fetcher: Fetcher):
     const others = previous.filter((c) => c.resource_id !== 1 && utcMs(c.start) > nowMs);
     const contests = [...codeforces, ...others].sort(byStart);
     await saveSnapshot(env, nowMs, "codeforces", contests, clistError);
-    return { contests, fetched: true };
+    return { contests, fetched: true, error: clistError };
   } catch (e) {
-    await setMeta(env.DB, "last_fetch_error", `${clistError}; ${errorText(e)}`).run();
-    return { contests: previous, fetched: false };
+    const error = `${clistError}; ${errorText(e)}`;
+    await setMeta(env.DB, "last_fetch_error", error).run();
+    return { contests: previous, fetched: false, error };
   }
 }
