@@ -10,7 +10,7 @@ Contest reminders for the CP community's WhatsApp **Announcements** group, poste
 | Delivery | Effectively once: no duplicates, no silent misses. A miss must produce an alert carrying the ready-to-paste text. |
 | Cost | $0 on free tiers, no credit card. |
 | Volume | 1–4 messages/day. |
-| Platform limits | Cloudflare Workers Free: 10 ms CPU per invocation, 5 cron triggers. D1 Free: 5M reads/day, 100k writes/day. GitHub Actions: `workflow_dispatch` usually starts within a minute; a concurrency group keeps at most one pending run and cancels older pending ones. |
+| Platform limits | Cloudflare Workers Free: 10 ms CPU per request, 5 cron triggers per account, 100,000 requests/day [1]. D1 Free: 5M rows read/day, 100k rows written/day, 500 MB per database [2]. GitHub Actions: at most one pending run per concurrency group; a newly queued run cancels and replaces the pending one [3]. |
 | WhatsApp | No official API reaches Community announcement groups, so the sender is an unofficial linked device (whatsmeow) on a spare number. Its session keys rotate on every connection and must be persisted after every run. Only one connection may be live at a time. See `research_notes/` and `reports/`. |
 
 ## Components
@@ -46,7 +46,7 @@ flowchart LR
 ## Key design decisions
 
 1. **Outbox, pulled by the sender.** The Worker writes due reminders to a durable outbox. A dispatch only means "wake up and drain the outbox". Any run drains everything pending, so a cancelled or dropped run loses nothing, and message text never appears in workflow inputs or logs. The same API also serves the always-on fallback host: a daemon simply polls `/outbox/claim`.
-2. **D1 for state, not KV.** Dedupe and claiming need atomic, read-your-writes operations (`INSERT … ON CONFLICT DO NOTHING`, `UPDATE … RETURNING`). KV is eventually consistent (up to ~60 s across locations) and limited to 1,000 writes/day.
+2. **D1 for state, not KV.** Dedupe and claiming need atomic, read-your-writes operations (`INSERT … ON CONFLICT DO NOTHING`, `UPDATE … RETURNING`, and `batch()`, which runs as one transaction [4]). KV changes "may take up to 60 seconds or more" to reach other locations [5], and the free tier allows 1,000 writes/day. D1's docs do not list `RETURNING`/`ON CONFLICT` explicitly, only general SQLite compatibility [6], so the Worker tests exercise both against the local D1 engine.
 3. **Natural contest identity.** A contest is identified by `(resource_id, href)`, which is the same whichever source the data came from. A reminder is identified by `resource_id|href|start`, so a rescheduled contest gets a new reminder.
 4. **Text rendered once, when the reminder is queued.** The stored text is exactly what is sent, which gives an audit trail. Placeholder names such as `Codeforces Round (Div. 2)` are usually filled in by then because the snapshot refreshes hourly.
 5. **The destination lives only with the sender.** `ANNOUNCE_JID` is a GitHub secret. The sender refuses any other chat and checks that the target is a community announcement subgroup where it is admin. A compromised Worker can at most post text to Announcements, capped per run.
@@ -183,7 +183,7 @@ All bodies are JSON. Auth is `Authorization: Bearer <token>`.
 1. If the snapshot is older than 60 minutes, fetch clist. On error or an empty result, fall back to the Codeforces API. If both fail, keep the old snapshot and record `last_fetch_error`.
 2. Compute due contests with `dueReminders(snapshot, rules, now)`. For each one, render the text and run `INSERT … ON CONFLICT(key) DO NOTHING` as `queued`.
 3. Expire `queued`/`claimed` rows past their deadline.
-4. If any rows are `queued` (or `claimed` with an expired lease) and `last_wake_at` is older than 4 minutes, dispatch the workflow and record `last_wake_at` after a 204 response.
+4. If any rows are `queued` (or `claimed` with an expired lease) and `last_wake_at` is older than 4 minutes, dispatch the workflow and record `last_wake_at` after a 2xx response. The endpoint currently returns `200` with the run ID [7]. Older behaviour was `204`, and both count as success.
 
 Overlapping ticks are safe: inserts are idempotent, and duplicate wakes only produce a run that finds an empty outbox.
 
@@ -256,3 +256,16 @@ scripts/           fixture tooling
 ## Fallback deployment
 
 If short-lived sessions on GitHub-hosted runners prove unreliable, the sender runs as a long-lived process on an Oracle Always Free VM and calls `/outbox/claim` every minute. Nothing else changes: the wake dispatch is disabled, and the API, data model and Worker stay as they are.
+
+## References
+
+Verified 2026-11-07.
+
+1. Cloudflare Workers limits: https://developers.cloudflare.com/workers/platform/limits/
+2. D1 pricing and limits: https://developers.cloudflare.com/d1/platform/pricing/, https://developers.cloudflare.com/d1/platform/limits/
+3. GitHub Actions concurrency: https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/control-the-concurrency-of-workflows-and-jobs
+4. D1 `batch()`: https://developers.cloudflare.com/d1/worker-api/d1-database/
+5. How KV works: https://developers.cloudflare.com/kv/concepts/how-kv-works/
+6. D1 SQL statements: https://developers.cloudflare.com/d1/sql-api/sql-statements/
+7. Create a workflow dispatch event: https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event
+8. Disabling workflows (only scheduled workflows are auto-disabled after 60 days without activity in public repos): https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-workflow-runs/disabling-and-enabling-a-workflow
