@@ -98,3 +98,11 @@ export async function ackReminders(env: Env, claimId: string, results: AckResult
   const outcomes = await env.DB.batch(results.map((r) => ackStatement(env.DB, claimId, r, now)));
   return outcomes.reduce((sum, o) => sum + o.meta.changes, 0);
 }
+
+export async function hasPendingReminders(env: Env, nowMs: number): Promise<boolean> {
+  const row = await env.DB
+    .prepare(`SELECT 1 AS pending FROM reminders WHERE ${ELIGIBLE} LIMIT 1`)
+    .bind(iso(nowMs), iso(nowMs - LEASE_MS), MAX_ATTEMPTS)
+    .first();
+  return row !== null;
+}
