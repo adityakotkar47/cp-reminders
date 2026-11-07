@@ -1,3 +1,4 @@
+import { adminRoutes } from "./admin.ts";
 import type { Env } from "./env.ts";
 import { json, text } from "./http.ts";
 import { outboxRoutes } from "./outbox.ts";
@@ -13,6 +14,7 @@ const routes: Route[] = [
     secret: "TICK_TOKEN",
     handle: async ({ env, now }) => json(await runTick(env, now, fetcher)),
   },
+  ...adminRoutes,
   ...outboxRoutes,
 ];
 
