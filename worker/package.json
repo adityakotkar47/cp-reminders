@@ -5,14 +5,15 @@
   "scripts": {
     "dev": "wrangler dev --test-scheduled",
     "deploy": "wrangler deploy",
-    "types": "wrangler types",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "bundle": "wrangler deploy --dry-run --outdir dist"
+    "types": "wrangler types --strict-vars false",
+    "typecheck": "npm run types && tsc --noEmit",
+    "test": "npm run types && vitest run",
+    "bundle": "wrangler deploy --dry-run --outdir dist",
+    "db:migrate:local": "wrangler d1 migrations apply cp-reminders --local",
+    "db:migrate:remote": "wrangler d1 migrations apply cp-reminders --remote"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.6.0",
-    "@cloudflare/workers-types": "^5.20261107.1",
     "@types/node": "^26.6.6",
     "typescript": "^7.0.2",
     "vitest": "^4.1.12",

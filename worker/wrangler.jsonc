@@ -14,6 +14,9 @@
     }
   ],
   "vars": { "GH_REPO": "adityakotkar47/cp-reminders" },
+  "secrets": {
+    "required": ["CLIST_USERNAME", "CLIST_API_KEY", "GH_TOKEN", "TICK_TOKEN", "ADMIN_TOKEN", "SENDER_TOKEN"]
+  },
   "observability": { "enabled": true },
   "minify": true
 }

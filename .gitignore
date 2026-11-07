@@ -8,3 +8,4 @@ session.db*
 .wrangler/
 .claude/
 dist/
+worker-configuration.d.ts
