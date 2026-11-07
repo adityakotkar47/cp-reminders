@@ -1,0 +1,272 @@
+// Package drain delivers claimed outbox items to the announcement group.
+package drain
+
+import (
+	"context"
+	"crypto/rand"
+	"errors"
+	"fmt"
+	"io"
+	mathrand "math/rand/v2"
+	"time"
+
+	"cp-reminders/sender/internal/outbox"
+	"cp-reminders/sender/internal/state"
+)
+
+const defaultAckTimeout = time.Minute
+
+var (
+	// ErrNotAnnouncements is returned when the target is not a community announcements group.
+	ErrNotAnnouncements = errors.New("target is not a community announcements group")
+	// ErrNotAdmin is returned when the sender is not an admin of the target.
+	ErrNotAdmin = errors.New("sender is not an admin of the target group")
+
+	errNotAttempted = errors.New("not attempted: an earlier step failed")
+)
+
+// Outbox claims and acknowledges queued items.
+type Outbox interface {
+	Claim(ctx context.Context, claimID string) ([]outbox.Item, error)
+	Ack(ctx context.Context, req outbox.AckRequest) error
+}
+
+// Group describes the target group as seen by the sender.
+type Group struct {
+	Name            string
+	IsAnnouncements bool
+	IsAdmin         bool
+}
+
+// Session is a connected WhatsApp client. Close disconnects and persists it.
+type Session interface {
+	Group(ctx context.Context, jid string) (Group, error)
+	SendText(ctx context.Context, jid, text string) (messageID string, err error)
+	Close() error
+}
+
+// Dialer opens and connects a Session.
+type Dialer func(ctx context.Context) (Session, error)
+
+// Ledger is the local record of delivered items.
+type Ledger interface {
+	Lookup(key string) (state.Entry, bool)
+	Record(e state.Entry) error
+}
+
+// Drainer runs one claim, deliver, ack cycle. Zero-valued function fields use
+// the real clock, randomness and sleep.
+type Drainer struct {
+	Outbox           Outbox
+	Dial             Dialer
+	Ledger           Ledger
+	Target           string
+	AllowNonAnnounce bool
+	DryRun           bool
+	Jitter           time.Duration
+	AckTimeout       time.Duration
+	Out              io.Writer
+	Summary          io.Writer
+	Now              func() time.Time
+	Sleep            func(ctx context.Context, d time.Duration) error
+	RandDuration     func(max time.Duration) time.Duration
+	NewClaimID       func() string
+}
+
+// Run drains the outbox once. It returns an error if any claimed item was not
+// delivered and acknowledged, after writing a failure report to Summary.
+func (d *Drainer) Run(ctx context.Context) error {
+	if err := ValidateTarget(d.Target); err != nil {
+		return err
+	}
+	claimID := d.newClaimID()
+	items, err := d.Outbox.Claim(ctx, claimID)
+	if err != nil {
+		err = fmt.Errorf("claim: %w", err)
+		d.report(summary{Err: err})
+		return err
+	}
+	if len(items) == 0 {
+		d.logf("outbox empty")
+		return nil
+	}
+	d.logf("claimed %d reminder(s) under claim %s", len(items), claimID)
+
+	results := make([]outbox.Result, len(items))
+	var pending []int
+	var failures []error
+	for i, verr := range ValidateItems(items) {
+		key := items[i].Key
+		if verr != nil {
+			results[i] = failedResult(key, verr)
+			failures = append(failures, fmt.Errorf("invalid item %q: %w", key, verr))
+			continue
+		}
+		if e, ok := d.Ledger.Lookup(key); ok {
+			results[i] = outbox.Result{Key: key, Status: outbox.StatusSent, MessageID: e.MessageID}
+			d.logf("already sent %s (message %s)", key, e.MessageID)
+			continue
+		}
+		pending = append(pending, i)
+	}
+	if len(pending) > 0 {
+		if err := d.deliver(ctx, items, results, pending); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	if d.DryRun {
+		d.logf("dry run: not acking; the claim lease expires and the items return to the queue")
+		return errors.Join(failures...)
+	}
+
+	ackErr := d.ack(ctx, claimID, results)
+	if ackErr != nil {
+		failures = append(failures, ackErr)
+	}
+	runErr := errors.Join(failures...)
+	if runErr != nil {
+		d.report(summary{Err: runErr, Items: items, Results: results, AckErr: ackErr})
+	}
+	return runErr
+}
+
+func (d *Drainer) deliver(ctx context.Context, items []outbox.Item, results []outbox.Result, pending []int) (err error) {
+	failFrom := func(n int, cause error) {
+		for _, i := range pending[n:] {
+			results[i] = failedResult(items[i].Key, cause)
+		}
+	}
+	if err := d.jitter(ctx); err != nil {
+		err = fmt.Errorf("jitter: %w", err)
+		failFrom(0, err)
+		return err
+	}
+	sess, err := d.Dial(ctx)
+	if err != nil {
+		err = fmt.Errorf("connect: %w", err)
+		failFrom(0, err)
+		return err
+	}
+	defer func() {
+		if cerr := sess.Close(); cerr != nil {
+			err = errors.Join(err, fmt.Errorf("close session: %w", cerr))
+		}
+	}()
+	if err := d.checkTarget(ctx, sess); err != nil {
+		failFrom(0, err)
+		return err
+	}
+	for n, i := range pending {
+		it := items[i]
+		if d.DryRun {
+			d.logf("dry run: would send %s:\n%s\n", it.Key, it.Text)
+			continue
+		}
+		id, err := sess.SendText(ctx, d.Target, it.Text)
+		if err != nil {
+			err = fmt.Errorf("send %s: %w", it.Key, err)
+			results[i] = failedResult(it.Key, err)
+			failFrom(n+1, errNotAttempted)
+			return err
+		}
+		results[i] = outbox.Result{Key: it.Key, Status: outbox.StatusSent, MessageID: id}
+		d.logf("sent %s (message %s)", it.Key, id)
+		if err := d.Ledger.Record(state.Entry{Key: it.Key, SentAt: d.now().UTC(), MessageID: id}); err != nil {
+			failFrom(n+1, errNotAttempted)
+			return fmt.Errorf("after sending %s: %w", it.Key, err)
+		}
+	}
+	return nil
+}
+
+func (d *Drainer) checkTarget(ctx context.Context, sess Session) error {
+	g, err := sess.Group(ctx, d.Target)
+	if err != nil {
+		return fmt.Errorf("look up target group: %w", err)
+	}
+	if !g.IsAnnouncements && !d.AllowNonAnnounce {
+		return fmt.Errorf("group %q: %w", g.Name, ErrNotAnnouncements)
+	}
+	if !g.IsAdmin {
+		return fmt.Errorf("group %q: %w", g.Name, ErrNotAdmin)
+	}
+	d.logf("target group %q verified (announcements=%t, admin=%t)", g.Name, g.IsAnnouncements, g.IsAdmin)
+	return nil
+}
+
+func (d *Drainer) ack(ctx context.Context, claimID string, results []outbox.Result) error {
+	timeout := d.AckTimeout
+	if timeout <= 0 {
+		timeout = defaultAckTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	defer cancel()
+	if err := d.Outbox.Ack(ctx, outbox.AckRequest{ClaimID: claimID, Results: results}); err != nil {
+		return fmt.Errorf("ack: %w", err)
+	}
+	d.logf("acked %d result(s)", len(results))
+	return nil
+}
+
+func (d *Drainer) jitter(ctx context.Context) error {
+	if d.Jitter <= 0 {
+		return nil
+	}
+	wait := d.randDuration(d.Jitter)
+	d.logf("waiting %s before connecting", wait.Round(time.Second))
+	return d.sleep(ctx, wait)
+}
+
+func (d *Drainer) report(s summary) {
+	if d.Summary == nil {
+		return
+	}
+	if err := writeSummary(d.Summary, s); err != nil {
+		d.logf("write step summary: %v", err)
+	}
+}
+
+func (d *Drainer) logf(format string, args ...any) {
+	if d.Out != nil {
+		fmt.Fprintf(d.Out, format+"\n", args...)
+	}
+}
+
+func (d *Drainer) now() time.Time {
+	if d.Now != nil {
+		return d.Now()
+	}
+	return time.Now()
+}
+
+func (d *Drainer) sleep(ctx context.Context, wait time.Duration) error {
+	if d.Sleep != nil {
+		return d.Sleep(ctx, wait)
+	}
+	t := time.NewTimer(wait)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+func (d *Drainer) randDuration(max time.Duration) time.Duration {
+	if d.RandDuration != nil {
+		return d.RandDuration(max)
+	}
+	return mathrand.N(max + 1)
+}
+
+func (d *Drainer) newClaimID() string {
+	if d.NewClaimID != nil {
+		return d.NewClaimID()
+	}
+	return rand.Text()
+}
+
+func failedResult(key string, err error) outbox.Result {
+	return outbox.Result{Key: key, Status: outbox.StatusFailed, Error: oneLine(err.Error())}
+}
