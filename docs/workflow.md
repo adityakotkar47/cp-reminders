@@ -27,7 +27,7 @@ It has two jobs, so that the token that can write to the repository never shares
 | `drain` (Drain Outbox) | `contents: read` | The sender, with its secrets. |
 | `persist` (Persist State), `needs: drain` | `contents: write` | No repository code: a pinned artifact action and `git`, pushing only `refs/heads/state`. |
 
-What `drain` hands to `persist` is untrusted: the artifact's contents and the outputs `changed` and `state-sha`. `persist` uses only the bytes of two regular files from the artifact and a value of `state-sha` that is empty or a commit ID; the artifact never becomes part of a git directory, and git runs without system or global configuration and without hooks. Code in `drain` can therefore choose what branch `state` holds, which it can already do with `AGE_IDENTITY`, but cannot obtain a token that writes `main`. It can also write Actions cache entries in the `main` scope, which `drain`, both jobs of `ci.yml` and both jobs of `deploy.yml` restore; `pnpm/setup` restores its lockfile-verification cache even in the `deploy` job, which does not use the pnpm store cache.
+What `drain` hands to `persist` is untrusted: the artifact's contents and the outputs `changed` and `state-sha`. `persist` uses only the bytes of two regular files from the artifact and a value of `state-sha` that is empty or a commit ID; the artifact never becomes part of a git directory, and git runs without system or global configuration and without hooks. Code in `drain` can therefore choose what branch `state` holds, which it can already do with `AGE_IDENTITY`, but cannot obtain a token that writes `main`. It can also write Actions cache entries in the `main` scope, which `drain`, both jobs of `ci.yml` and the `check` job of `deploy.yml` restore; none of them holds the write token or the Cloudflare token, and the `deploy` job restores no cache.
 
 | Aspect | Setting | Reason |
 |---|---|---|
@@ -62,12 +62,13 @@ Runs on a push to `main` that changes `worker/`, the workspace files (`package.j
 | Permissions | `contents: read` | It only reads the code. |
 | Jobs | `check`, then `deploy` (`needs: check`), each on its own runner | The typecheck and the tests, which run the test framework and the repository's test code, never run on the runner that receives the Cloudflare token. |
 | Secrets | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` in the `env:` of the migration and deploy steps of `deploy` | Wrangler reads both from the environment ([system environment variables](https://developers.cloudflare.com/workers/wrangler/system-environment-variables/)). Wrangler and the packages it loads necessarily run with the token. |
-| Cache | `check` restores and saves the pnpm store; `deploy` does not use it and installs from the registry | Nothing written by a job that ran test code reaches the runner that receives the token, and every package `deploy` installs is checked against the lockfile's hashes. |
+| Cache | `check` sets up with [`pnpm/setup`](https://github.com/pnpm/setup), which restores and saves the pnpm store and its lockfile-verification cache. `deploy` restores no Actions cache. | No Actions cache entry, which any job on `main` can write, reaches the runner that receives the token. |
+| Toolchain in `deploy` | Node 24 from the runner image, selected by [`actions/setup-node`](https://github.com/actions/setup-node) with `package-manager-cache: false` and no `cache` input. pnpm from the registry, checked against `pnpm-lock.yaml`: the step reads the version from the root `packageManager` field, downloads `pnpm` and `@pnpm/exe.linux-x64` at that version, compares each tarball's SHA-512 with the integrity the lockfile records for it, and fails on a missing or different hash. It places the native binary from `@pnpm/exe.linux-x64` under the wrapper's four bin names, as the wrapper's install script would, without running any package script, and checks that `pnpm --version` prints the expected version. The workspace is installed with `pnpm install --frozen-lockfile`. | pnpm runs with the token, so it is trusted only as far as the hashes committed in the repository, and every dependency is checked against the lockfile as well. The `check` job's Node 24 patch release can differ from the one `deploy` runs. |
 
-Jobs, in `worker/`:
+Jobs:
 
-1. `check`: typecheck and test, so a change that fails the checks is never deployed.
-2. `deploy`: apply pending D1 migrations (`pnpm run db:migrate:remote`), then deploy with `pnpm run deploy --message "$GITHUB_SHA"`, which keeps the Worker's stored secrets.
+1. `check`, in `worker/`: typecheck and test, so a change that fails the checks is never deployed.
+2. `deploy`: set up Node and pnpm and install the workspace as above, then, in `worker/`, apply pending D1 migrations (`pnpm run db:migrate:remote`) and deploy with `pnpm run deploy --message "$GITHUB_SHA"`, which keeps the Worker's stored secrets.
 
 ## ci.yml: checks
 
@@ -78,4 +79,4 @@ Runs on every push and pull request, with `contents: read` and a concurrency gro
 | `worker` | [`pnpm/setup`](https://github.com/pnpm/setup) installs Node 24, the pnpm version in the root `packageManager` field, and the workspace; then `pnpm --filter cp-reminders-worker typecheck` and `test`. The tests include the golden tests in `worker/test/core/`. |
 | `sender` | `go vet ./...` and `go test ./...` in `sender/`. |
 
-The root `package.json` contains only `name`, `private` and `packageManager`: `pnpm/setup` takes the pnpm version from it and runs `pnpm install` when a `package.json` is present.
+The root `package.json` contains only `name`, `private` and `packageManager`: `pnpm/setup` takes the pnpm version from it and runs `pnpm install` when a `package.json` is present. `packageManager` must have the form `pnpm@x.y.z`, with no hash suffix, and `devEngines.packageManager` must not be set: the `deploy` job of `deploy.yml` accepts nothing else, and it finds that version's hashes in the first document of `pnpm-lock.yaml`.
