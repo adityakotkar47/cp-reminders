@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"sync"
 	"testing"
 
+	signallog "go.mau.fi/libsignal/logger"
 	"go.mau.fi/whatsmeow/types"
 
 	"cp-reminders/sender/internal/drain"
@@ -217,7 +219,7 @@ func TestDrainRefusesNonAnnouncementsTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sess := &groupOnlySession{group: drain.Group{Name: "General", IsAdmin: true}}
+	sess := &groupOnlySession{group: drain.Group{IsAdmin: true}}
 	d.Dial = func(context.Context) (drain.Session, error) { return sess, nil }
 	if err := d.Run(context.Background()); !errors.Is(err, drain.ErrNotAnnouncements) {
 		t.Fatalf("Run: got %v, want ErrNotAnnouncements", err)
@@ -236,6 +238,79 @@ func TestPairRefusesExistingSessionWithoutForce(t *testing.T) {
 	err := run(context.Background(), []string{"pair", "--state", dir}, env, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "--force") {
 		t.Fatalf("pair: got %v", err)
+	}
+}
+
+func TestErrorLineRedactsWhatsAppIDs(t *testing.T) {
+	got := errorLine(fmt.Errorf("connect: %w", errors.New("stream replaced for 919876543210:5@s.whatsapp.net")))
+	want := "wa: connect: stream replaced for <id>@s.whatsapp.net"
+	if got != want {
+		t.Errorf("errorLine: got %q, want %q", got, want)
+	}
+}
+
+func TestLoggerRedactsWhatsAppIDs(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = stdout })
+
+	f := newFlags("drain", io.Discard, true)
+	if err := f.parse([]string{"--state", t.TempDir(), "--log-level", "WARN"}); err != nil {
+		t.Fatal(err)
+	}
+	f.logger().Sub("Client").Warnf("retry receipt from %s", "919876543210@s.whatsapp.net")
+	signallog.Warning("no session found for user 123456789012345_1:5")
+	signallog.Info("below the log level")
+	w.Close()
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"[wa/Client WARN] retry receipt from <id>@s.whatsapp.net",
+		"[wa/Signal WARN] main_test.go:",
+		": no session found for user <number>:5",
+	} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("output %q does not contain %q", out, want)
+		}
+	}
+	for _, leak := range []string{"919876543210", "123456789012345", "below the log level"} {
+		if strings.Contains(string(out), leak) {
+			t.Errorf("output %q contains %q", out, leak)
+		}
+	}
+}
+
+func TestLoggerNeverPrintsSignalDebug(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = stdout })
+
+	f := newFlags("drain", io.Discard, true)
+	if err := f.parse([]string{"--state", t.TempDir(), "--log-level", "DEBUG"}); err != nil {
+		t.Fatal(err)
+	}
+	f.logger().Debugf("whatsmeow debug line")
+	signallog.Debug("Using cipherKey: [1 2 3 250]")
+	w.Close()
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "[wa DEBUG] whatsmeow debug line") {
+		t.Errorf("output %q lacks the whatsmeow debug line", out)
+	}
+	if strings.Contains(string(out), "cipherKey") {
+		t.Errorf("output %q contains a libsignal debug line", out)
 	}
 }
 

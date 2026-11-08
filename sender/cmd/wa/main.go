@@ -19,8 +19,10 @@ import (
 	"strings"
 	"syscall"
 
+	signallog "go.mau.fi/libsignal/logger"
 	waLog "go.mau.fi/whatsmeow/util/log"
 
+	"cp-reminders/sender/internal/redact"
 	"cp-reminders/sender/internal/state"
 )
 
@@ -54,12 +56,16 @@ func main() {
 	switch {
 	case err == nil, errors.Is(err, flag.ErrHelp):
 	case errors.Is(err, errUsage):
-		fmt.Fprintln(os.Stderr, "wa:", err)
+		fmt.Fprintln(os.Stderr, errorLine(err))
 		os.Exit(2)
 	default:
-		fmt.Fprintln(os.Stderr, "wa:", err)
+		fmt.Fprintln(os.Stderr, errorLine(err))
 		os.Exit(1)
 	}
+}
+
+func errorLine(err error) string {
+	return "wa: " + redact.String(err.Error())
 }
 
 func run(ctx context.Context, args []string, getenv func(string) string, out io.Writer) error {
@@ -100,7 +106,7 @@ func newFlags(name string, out io.Writer, withState bool) *flags {
 	f := &flags{FlagSet: fs}
 	if withState {
 		f.state = fs.String("state", "", "state directory holding "+state.SessionFile+" and "+state.LedgerFile+" (required)")
-		f.logLevel = fs.String("log-level", "WARN", "whatsmeow log level: DEBUG, INFO, WARN or ERROR")
+		f.logLevel = fs.String("log-level", "WARN", "whatsmeow and libsignal log level: DEBUG, INFO, WARN or ERROR")
 	}
 	return f
 }
@@ -122,7 +128,9 @@ func (f *flags) parse(args []string) error {
 }
 
 func (f *flags) logger() waLog.Logger {
-	return waLog.Stdout("wa", strings.ToUpper(*f.logLevel), false)
+	base := waLog.Stdout("wa", strings.ToUpper(*f.logLevel), false)
+	signallog.Logger = redact.Signal(base.Sub("Signal"))
+	return redact.Logger(base)
 }
 
 func requireEnv(getenv func(string) string, names ...string) ([]string, error) {
