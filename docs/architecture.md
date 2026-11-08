@@ -11,7 +11,7 @@ Contest reminders for the CP community's WhatsApp **Announcements** group, poste
 | Cost | $0 on free tiers, no credit card. |
 | Volume | 1–4 messages/day. |
 | Platform limits | Cloudflare Workers Free: 10 ms CPU per request, 5 cron triggers per account, 100,000 requests/day [1]. D1 Free: 5M rows read/day, 100k rows written/day, 500 MB per database [2]. GitHub Actions: at most one pending run per concurrency group; a newly queued run cancels and replaces the pending one [3]. |
-| WhatsApp | No official API reaches Community announcement groups, so the sender is an unofficial linked device (whatsmeow) on a spare number. Its session keys rotate on every connection and must be persisted after every run. Only one connection may be live at a time. See `research_notes/` and `reports/`. |
+| WhatsApp | No official API reaches Community announcement groups, so the sender is an unofficial linked device (whatsmeow) on a spare number. Its session keys rotate on every connection and must be persisted after every run. Only one connection may be live at a time. See `docs/research/`. |
 
 ## Components
 
@@ -38,14 +38,14 @@ flowchart LR
 
 | Component | Responsibility | Does not |
 |---|---|---|
-| Core (`src/`) | Pure functions: select contests, compute due reminders, render text. Shared by Worker and tests. | Any I/O. |
-| Worker (`worker/`) | Fetch and cache contests, decide what is due, persist reminders, wake the sender, serve the outbox, expose health. | Talk to WhatsApp. Know the target chat. |
+| Core (`worker/src/core/`) | Pure functions: select contests, compute due reminders, render text. | Any I/O. |
+| Worker (`worker/`) | Fetch and cache contests, decide what is due, persist reminders, wake the sender, serve the outbox, expose health and a status badge. | Talk to WhatsApp. Know the target chat. |
 | Sender (`sender/`) | Claim queued reminders, deliver them to the one allowlisted chat, ack results, persist the WhatsApp session. | Decide what or when to send. Accept a destination from the network. |
 | Workflow (`.github/workflows/send.yml`) | Run the sender with secrets, serialised, and persist state. | Carry message content (the dispatch is only a wake-up). |
 
 ## Key design decisions
 
-1. **Outbox, pulled by the sender.** The Worker writes due reminders to a durable outbox. A dispatch only means "wake up and drain the outbox". Any run drains everything pending, so a cancelled or dropped run loses nothing, and message text never appears in workflow inputs or logs. The same API also serves the always-on fallback host: a daemon simply polls `/outbox/claim`.
+1. **Outbox, pulled by the sender.** The Worker writes due reminders to a durable outbox. A dispatch only means "wake up and drain the outbox". Any run drains everything pending, so a cancelled or dropped run loses nothing, and message text never appears in workflow inputs or logs. The same API would also serve an always-on host (see [Fallback deployment](#fallback-deployment)).
 2. **D1 for state, not KV.** Dedupe and claiming need atomic, read-your-writes operations (`INSERT … ON CONFLICT DO NOTHING`, `UPDATE … RETURNING`, and `batch()`, which runs as one transaction [4]). KV changes "may take up to 60 seconds or more" to reach other locations [5], and the free tier allows 1,000 writes/day. D1's docs do not list `RETURNING`/`ON CONFLICT` explicitly, only general SQLite compatibility [6], so the Worker tests exercise both against the local D1 engine.
 3. **Natural contest identity.** A contest is identified by `(resource_id, href)`, which is the same whichever source the data came from. A reminder is identified by `resource_id|href|start`, so a rescheduled contest gets a new reminder.
 4. **Text rendered once, when the reminder is queued.** The stored text is exactly what is sent, which gives an audit trail. Placeholder names such as `Codeforces Round (Div. 2)` are usually filled in by then because the snapshot refreshes hourly.
@@ -57,46 +57,9 @@ flowchart LR
 
 All timestamps are stored in UTC, ISO 8601 with `Z`. IST exists only in rendered text.
 
-### D1 schema (`worker/migrations/`)
+### D1 tables
 
-```sql
-CREATE TABLE contest_snapshot (
-  id          INTEGER PRIMARY KEY CHECK (id = 1),
-  source      TEXT    NOT NULL CHECK (source IN ('clist', 'codeforces')),
-  fetched_at  TEXT    NOT NULL,
-  payload     TEXT    NOT NULL
-);
-
-CREATE TABLE reminders (
-  key           TEXT    PRIMARY KEY,
-  resource_id   INTEGER NOT NULL,
-  href          TEXT    NOT NULL,
-  start_utc     TEXT    NOT NULL,
-  deadline_utc  TEXT    NOT NULL,
-  text          TEXT    NOT NULL,
-  status        TEXT    NOT NULL CHECK (status IN ('queued', 'claimed', 'sent', 'failed', 'expired')),
-  attempts      INTEGER NOT NULL DEFAULT 0,
-  claim_id      TEXT,
-  claimed_at    TEXT,
-  message_id    TEXT,
-  last_error    TEXT,
-  created_at    TEXT    NOT NULL,
-  updated_at    TEXT    NOT NULL,
-  sent_at       TEXT
-);
-CREATE INDEX reminders_by_status ON reminders (status, deadline_utc);
-
-CREATE TABLE tip_overrides (
-  href        TEXT PRIMARY KEY,
-  tip         TEXT NOT NULL,
-  updated_at  TEXT NOT NULL
-);
-
-CREATE TABLE meta (
-  k  TEXT PRIMARY KEY,
-  v  TEXT NOT NULL
-);
-```
+The schema is [`worker/migrations/0001_init.sql`](../worker/migrations/0001_init.sql).
 
 | Table | Kind | Why this shape |
 |---|---|---|
@@ -129,7 +92,7 @@ stateDiagram-v2
 
 ### Static config (repo, bundled into the Worker at deploy)
 
-`config/rules.json` (selection, lead times) and `config/tips.json` (tip rules), documented in `docs/formatter.md`.
+`worker/config/rules.json` (selection, lead times) and `worker/config/tips.json` (tip rules), documented in `docs/formatter.md`.
 
 ### Sender state (branch `state`)
 
@@ -162,7 +125,8 @@ All bodies are JSON. Auth is `Authorization: Bearer <token>`.
 | Method and path | Auth | Purpose |
 |---|---|---|
 | `GET /health` | none | `{lastTickAt, lastFetchAt, lastFetchSource, lastFetchError, queued, claimed, failed24h, expired24h}`. No secrets and no message text. |
-| `POST /tick` | `TICK_TOKEN` | Runs one tick. Returns `{fetched, queued, woke}`. |
+| `GET /badge` | none | The same health, summarised as a [shields.io endpoint badge](https://shields.io/badges/endpoint-badge): `{schemaVersion: 1, label: "bot", message, color}`. See [Status badge](#status-badge). |
+| `POST /tick` | `TICK_TOKEN` | Runs one tick. Returns `{fetched, queued, woke, errors}`. |
 | `GET /preview` | `ADMIN_TOKEN` | Next 10 reminders: send time (IST) and rendered text. |
 | `PUT /tips` | `ADMIN_TOKEN` | `{href, tip}` upserts a one-off tip. An empty `tip` suppresses the tip for that contest. |
 | `DELETE /tips` | `ADMIN_TOKEN` | `{href}` |
@@ -171,7 +135,20 @@ All bodies are JSON. Auth is `Authorization: Bearer <token>`.
 
 ### Workflow trigger
 
-`POST /repos/{owner}/{repo}/actions/workflows/send.yml/dispatches` with `{"ref": "main"}`. There are no inputs.
+`POST /repos/{owner}/{repo}/actions/workflows/send.yml/dispatches` with `{"ref": "main"}`. There are no inputs. `send.yml` has no `schedule` trigger, so GitHub's 60-day inactivity auto-disable does not apply to it [8].
+
+### Status badge
+
+`GET /badge` derives one state from the health values, first match wins:
+
+| State | Condition | `message` | `color` |
+|---|---|---|---|
+| down | no tick for more than 15 minutes, or never ticked | `no tick for 23m` / `never ticked` | `red` |
+| failing | `failed24h + expired24h > 0` | `2 missed in 24h` | `red` |
+| degraded | `lastFetchError` is set | `degraded: clist` | `yellow` |
+| healthy | otherwise | `ok · tick 3m ago` | `brightgreen` |
+
+The README embeds `https://img.shields.io/endpoint?url=<WORKER_URL>/badge`. The response is computed from D1 on each request and carries `Cache-Control: max-age=300`; shields.io applies its own minimum cache on top.
 
 ### Sender CLI
 
@@ -219,7 +196,7 @@ sequenceDiagram
 | Failure | Effect | Handling |
 |---|---|---|
 | clist down or rate-limited | No fresh data | Codeforces fallback. The stale snapshot stays usable for already-known contests. Visible in `/health`. |
-| Worker cron delayed or skipped | Late tick | cron-job.org is the second trigger. The due window (lead 75 → deadline 10 min) tolerates ticks being late by up to an hour. |
+| Worker cron delayed or skipped | Late tick | The due window (lead 75 → deadline 10 min) tolerates ticks being late by up to an hour. cron-job.org hitting `POST /tick` is an optional second trigger; it is not configured yet. The badge turns red after 15 minutes without a tick. |
 | Dispatch fails (GitHub API) | Sender not woken | `last_wake_at` is not updated, so the next tick retries. |
 | Run cancelled while pending | None | The outbox still holds the rows, and the next run drains them. |
 | Two runs at once | Prevented | Concurrency group `wa-session`. A single live socket is also a ban-risk requirement. |
@@ -233,7 +210,7 @@ sequenceDiagram
 
 | Resource | Per day | Free limit |
 |---|---|---|
-| Worker requests | ~600 (2 × 288 ticks, plus API calls) | 100,000 |
+| Worker requests | ~300 cron ticks, plus API and badge calls (badge cached ≥ 5 min) | 100,000 |
 | Worker CPU per tick | low single-digit ms; JSON parse of ~30 contests and SQL round trips are I/O | 10 ms |
 | D1 writes | ~24 snapshot, ~4 reminders × ~3 transitions, ~300 meta | 100,000 |
 | D1 reads | ~2,000 | 5,000,000 |
@@ -243,15 +220,18 @@ sequenceDiagram
 ## Repository layout
 
 ```
-config/            rules.json, tips.json
-src/               pure core (format, select)
-test/              core tests (node:test)
-fixtures/          real clist data + manual history for golden tests
-worker/            Cloudflare Worker, D1 migrations, worker tests
-sender/            Go module (whatsmeow), sender tests
-.github/workflows/ send.yml (wake → drain), ci.yml (tests on push)
-docs/              this file, formatter.md, scheduler.md, sender.md, workflow.md, operations.md
-scripts/           fixture tooling
+worker/              Cloudflare Worker (pnpm workspace package)
+  config/            rules.json, tips.json
+  migrations/        D1 schema
+  src/core/          pure core: contest selection and message formatting
+  src/               scheduler, outbox API, health and badge
+  test/core/         golden tests against the manual reminder history
+  test/fixtures/     frozen clist data and manual history (captured 2026-11-07)
+  test/              Worker tests (Workers runtime, local D1)
+sender/              Go module: cmd/wa, internal/{drain,outbox,state,wa}
+.github/workflows/   send.yml (wake → drain), ci.yml (tests on push)
+docs/                architecture, formatter, scheduler, sender, workflow
+docs/research/       the research behind the design decisions
 ```
 
 ## Fallback deployment
@@ -260,7 +240,7 @@ If short-lived sessions on GitHub-hosted runners prove unreliable, the sender ru
 
 ## References
 
-Verified 2026-11-07.
+Verified 2026-11-07 and 2026-11-08.
 
 1. Cloudflare Workers limits: https://developers.cloudflare.com/workers/platform/limits/
 2. D1 pricing and limits: https://developers.cloudflare.com/d1/platform/pricing/, https://developers.cloudflare.com/d1/platform/limits/
@@ -270,3 +250,4 @@ Verified 2026-11-07.
 6. D1 SQL statements: https://developers.cloudflare.com/d1/sql-api/sql-statements/
 7. Create a workflow dispatch event: https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event
 8. Disabling workflows (only scheduled workflows are auto-disabled after 60 days without activity in public repos): https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-workflow-runs/disabling-and-enabling-a-workflow
+9. shields.io endpoint badge: https://shields.io/badges/endpoint-badge
