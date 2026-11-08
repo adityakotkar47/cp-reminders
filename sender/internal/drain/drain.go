@@ -14,7 +14,7 @@ import (
 	"cp-reminders/sender/internal/state"
 )
 
-const defaultAckTimeout = time.Minute
+const ackTimeout = time.Minute
 
 var (
 	// ErrNotAnnouncements is returned when the target is not a community announcements group.
@@ -63,7 +63,6 @@ type Drainer struct {
 	Target       string
 	DryRun       bool
 	Jitter       time.Duration
-	AckTimeout   time.Duration
 	Out          io.Writer
 	Summary      io.Writer
 	Now          func() time.Time
@@ -194,11 +193,7 @@ func (d *Drainer) checkTarget(ctx context.Context, sess Session) error {
 }
 
 func (d *Drainer) ack(ctx context.Context, claimID string, results []outbox.Result) error {
-	timeout := d.AckTimeout
-	if timeout <= 0 {
-		timeout = defaultAckTimeout
-	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ackTimeout)
 	defer cancel()
 	if err := d.Outbox.Ack(ctx, outbox.AckRequest{ClaimID: claimID, Results: results}); err != nil {
 		return fmt.Errorf("ack: %w", err)

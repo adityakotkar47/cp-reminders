@@ -16,6 +16,7 @@ import (
 const (
 	maxResponseBytes = 1 << 20
 	maxErrorBody     = 200
+	ackAttempts      = 3
 )
 
 // Item is a queued reminder returned by /outbox/claim.
@@ -80,7 +81,6 @@ type Client struct {
 	Token          string
 	HTTP           *http.Client
 	RequestTimeout time.Duration
-	AckAttempts    int
 	Backoff        func(attempt int) time.Duration
 }
 
@@ -91,7 +91,6 @@ func New(baseURL, token string) *Client {
 		Token:          token,
 		HTTP:           http.DefaultClient,
 		RequestTimeout: 15 * time.Second,
-		AckAttempts:    3,
 		Backoff:        func(attempt int) time.Duration { return time.Second << (attempt - 1) },
 	}
 }
@@ -109,7 +108,7 @@ func (c *Client) Claim(ctx context.Context, claimID string) ([]Item, error) {
 // Ack reports results for claimID, retrying transient failures.
 func (c *Client) Ack(ctx context.Context, req AckRequest) error {
 	var err error
-	for attempt := 1; attempt <= c.AckAttempts; attempt++ {
+	for attempt := 1; attempt <= ackAttempts; attempt++ {
 		if attempt > 1 {
 			if serr := sleep(ctx, c.Backoff(attempt-1)); serr != nil {
 				return fmt.Errorf("outbox ack: %w", errors.Join(err, serr))
