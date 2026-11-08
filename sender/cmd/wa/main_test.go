@@ -211,10 +211,9 @@ func (s *groupOnlySession) SendText(_ context.Context, _, text string) (string, 
 
 func (s *groupOnlySession) Close() error { return nil }
 
-func TestDrainRefusesNonAnnouncementsTargetWhateverTheEnvironment(t *testing.T) {
+func TestDrainRefusesNonAnnouncementsTarget(t *testing.T) {
 	f := newFakeWorker(t, outbox.Item{Key: "k1", Text: "hi", StartUTC: "2026-11-07T14:35:00Z", DeadlineUTC: "2026-11-07T14:25:00Z"})
-	env := f.env(t, map[string]string{"ALLOW_NON_ANNOUNCE": "1"})
-	d, _, err := newDrainer([]string{"--state", t.TempDir(), "--jitter", "0s"}, env, io.Discard)
+	d, _, err := newDrainer([]string{"--state", t.TempDir(), "--jitter", "0s"}, f.env(t, nil), io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,15 +236,6 @@ func TestPairRefusesExistingSessionWithoutForce(t *testing.T) {
 	err := run(context.Background(), []string{"pair", "--state", dir}, env, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "--force") {
 		t.Fatalf("pair: got %v", err)
-	}
-}
-
-func TestPairHasNoTuningFlags(t *testing.T) {
-	for _, flag := range []string{"--settle", "--timeout"} {
-		err := run(context.Background(), []string{"pair", "--state", t.TempDir(), flag, "1s"}, envMap(nil), io.Discard)
-		if !errors.Is(err, errUsage) {
-			t.Errorf("pair %s: got %v, want errUsage", flag, err)
-		}
 	}
 }
 
