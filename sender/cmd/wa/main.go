@@ -21,7 +21,7 @@ import (
 
 	waLog "go.mau.fi/whatsmeow/util/log"
 
-	"github.com/adityakotkar47/cp-reminders/sender/internal/state"
+	"cp-reminders/sender/internal/state"
 )
 
 const (

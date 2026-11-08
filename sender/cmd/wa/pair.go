@@ -12,8 +12,8 @@ import (
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow/store"
 
-	"github.com/adityakotkar47/cp-reminders/sender/internal/state"
-	"github.com/adityakotkar47/cp-reminders/sender/internal/wa"
+	"cp-reminders/sender/internal/state"
+	"cp-reminders/sender/internal/wa"
 )
 
 const (

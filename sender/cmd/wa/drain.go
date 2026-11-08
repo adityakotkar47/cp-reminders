@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/adityakotkar47/cp-reminders/sender/internal/drain"
-	"github.com/adityakotkar47/cp-reminders/sender/internal/outbox"
-	"github.com/adityakotkar47/cp-reminders/sender/internal/state"
+	"cp-reminders/sender/internal/drain"
+	"cp-reminders/sender/internal/outbox"
+	"cp-reminders/sender/internal/state"
 )
 
 func runDrain(ctx context.Context, args []string, getenv func(string) string, out io.Writer) error {

@@ -10,8 +10,8 @@ import (
 	mathrand "math/rand/v2"
 	"time"
 
-	"github.com/adityakotkar47/cp-reminders/sender/internal/outbox"
-	"github.com/adityakotkar47/cp-reminders/sender/internal/state"
+	"cp-reminders/sender/internal/outbox"
+	"cp-reminders/sender/internal/state"
 )
 
 const ackTimeout = time.Minute

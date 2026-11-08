@@ -9,9 +9,9 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	waLog "go.mau.fi/whatsmeow/util/log"
 
-	"github.com/adityakotkar47/cp-reminders/sender/internal/drain"
-	"github.com/adityakotkar47/cp-reminders/sender/internal/state"
-	"github.com/adityakotkar47/cp-reminders/sender/internal/wa"
+	"cp-reminders/sender/internal/drain"
+	"cp-reminders/sender/internal/state"
+	"cp-reminders/sender/internal/wa"
 )
 
 type conn struct {

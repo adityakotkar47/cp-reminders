@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/adityakotkar47/cp-reminders/sender/internal/outbox"
+	"cp-reminders/sender/internal/outbox"
 )
 
 func item(key, text string) outbox.Item {

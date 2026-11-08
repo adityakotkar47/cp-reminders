@@ -11,7 +11,7 @@ import (
 
 	"go.mau.fi/whatsmeow/types"
 
-	"github.com/adityakotkar47/cp-reminders/sender/internal/wa"
+	"cp-reminders/sender/internal/wa"
 )
 
 func runGroups(ctx context.Context, args []string, getenv func(string) string, out io.Writer) (err error) {

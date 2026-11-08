@@ -1,4 +1,4 @@
-module github.com/adityakotkar47/cp-reminders/sender
+module cp-reminders/sender
 
 go 1.26.0
 

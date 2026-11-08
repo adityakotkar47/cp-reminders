@@ -26,7 +26,7 @@ describe("maybeWake", () => {
 
     expect(calls.github).toHaveLength(1);
     const call = calls.github[0]!;
-    expect(call.url).toBe("https://api.github.com/repos/adityakotkar47/cp-reminders/actions/workflows/send.yml/dispatches");
+    expect(call.url).toBe(`https://api.github.com/repos/${env.GH_REPO}/actions/workflows/send.yml/dispatches`);
     expect(call.init?.method).toBe("POST");
     expect(JSON.parse(String(call.init?.body))).toEqual({ ref: "main" });
     const headers = call.init?.headers as Record<string, string>;

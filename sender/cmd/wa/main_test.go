@@ -15,9 +15,9 @@ import (
 
 	"go.mau.fi/whatsmeow/types"
 
-	"github.com/adityakotkar47/cp-reminders/sender/internal/drain"
-	"github.com/adityakotkar47/cp-reminders/sender/internal/outbox"
-	"github.com/adityakotkar47/cp-reminders/sender/internal/state"
+	"cp-reminders/sender/internal/drain"
+	"cp-reminders/sender/internal/outbox"
+	"cp-reminders/sender/internal/state"
 )
 
 func envMap(m map[string]string) func(string) string {
