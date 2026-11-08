@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"cp-reminders/sender/internal/outbox"
+	"github.com/adityakotkar47/cp-reminders/sender/internal/outbox"
 )
 
 func TestSummaryListsOnlyUnsentItemsWithText(t *testing.T) {

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"cp-reminders/sender/internal/outbox"
-	"cp-reminders/sender/internal/state"
+	"github.com/adityakotkar47/cp-reminders/sender/internal/outbox"
+	"github.com/adityakotkar47/cp-reminders/sender/internal/state"
 )
 
 const target = "120363000000000001@g.us"

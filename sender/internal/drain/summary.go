@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"cp-reminders/sender/internal/outbox"
+	"github.com/adityakotkar47/cp-reminders/sender/internal/outbox"
 )
 
 type summary struct {

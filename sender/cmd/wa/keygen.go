@@ -6,7 +6,7 @@ import (
 	"io"
 	"time"
 
-	"cp-reminders/sender/internal/state"
+	"github.com/adityakotkar47/cp-reminders/sender/internal/state"
 )
 
 func runKeygen(ctx context.Context, args []string, getenv func(string) string, out io.Writer) error {

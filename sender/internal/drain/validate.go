@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"cp-reminders/sender/internal/outbox"
+	"github.com/adityakotkar47/cp-reminders/sender/internal/outbox"
 )
 
 // Limits applied to every claim.
