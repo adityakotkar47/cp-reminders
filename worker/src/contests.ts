@@ -1,6 +1,6 @@
 import { type Contest, PLATFORM, isoUtc, utcMs } from "./core/format.ts";
 import type { Fetcher } from "./env.ts";
-import { errorMessage } from "./errors.ts";
+import { FAILURE, UpstreamError, errorMessage, failureCode, httpFailure } from "./errors.ts";
 import { deleteMeta, setMeta } from "./meta.ts";
 
 export type Source = "clist" | "codeforces";
@@ -40,16 +40,17 @@ async function fetchClist(env: Env, nowMs: number, fetcher: Fetcher): Promise<Co
     headers: { Authorization: `ApiKey ${env.CLIST_USERNAME}:${env.CLIST_API_KEY}` },
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
-  if (!res.ok) throw new Error(`clist HTTP ${res.status}`);
-  const body = (await res.json()) as { objects?: Contest[] };
-  const contests = (body.objects ?? []).map(({ resource_id, event, start, duration, href }) => ({
+  if (!res.ok) throw new UpstreamError(httpFailure(res.status), `clist HTTP ${res.status}`);
+  const body = (await res.json()) as { objects?: unknown } | null;
+  if (!Array.isArray(body?.objects)) throw new UpstreamError(FAILURE.invalid, "clist returned no contest list");
+  const contests = (body.objects as Contest[]).map(({ resource_id, event, start, duration, href }) => ({
     resource_id,
     event,
     start,
     duration,
     href,
   }));
-  if (contests.length === 0) throw new Error("clist returned no contests");
+  if (contests.length === 0) throw new UpstreamError(FAILURE.empty, "clist returned no contests");
   return contests;
 }
 
@@ -57,9 +58,11 @@ async function fetchCodeforces(fetcher: Fetcher): Promise<Contest[]> {
   const res = await fetcher("https://codeforces.com/api/contest.list?gym=false", {
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
-  if (!res.ok) throw new Error(`codeforces HTTP ${res.status}`);
-  const body = (await res.json()) as CodeforcesResponse;
-  if (body.status !== "OK" || !body.result) throw new Error(`codeforces: ${body.comment ?? body.status}`);
+  if (!res.ok) throw new UpstreamError(httpFailure(res.status), `codeforces HTTP ${res.status}`);
+  const body = (await res.json()) as CodeforcesResponse | null;
+  if (body?.status !== "OK" || !Array.isArray(body.result)) {
+    throw new UpstreamError(FAILURE.invalid, `codeforces: ${body?.comment ?? body?.status ?? "no contest list"}`);
+  }
   const contests: Contest[] = [];
   for (const c of body.result) {
     if (c.phase !== "BEFORE" || c.startTimeSeconds === undefined) continue;
@@ -71,7 +74,7 @@ async function fetchCodeforces(fetcher: Fetcher): Promise<Contest[]> {
       href: `https://codeforces.com/contests/${c.id}`,
     });
   }
-  if (contests.length === 0) throw new Error("codeforces returned no upcoming contests");
+  if (contests.length === 0) throw new UpstreamError(FAILURE.empty, "codeforces returned no upcoming contests");
   return contests.sort(byStart);
 }
 
@@ -106,24 +109,37 @@ export async function ensureSnapshot(env: Env, nowMs: number, fetcher: Fetcher):
   const previous: Contest[] = row ? (JSON.parse(row.payload) as Contest[]) : [];
   if (row && nowMs - Date.parse(row.fetched_at) < SNAPSHOT_TTL_MS) return { contests: previous, fetched: false };
 
-  let clistError: string;
-  try {
-    const contests = await fetchClist(env, nowMs, fetcher);
-    await saveSnapshot(env, nowMs, "clist", contests, null);
-    return { contests, fetched: true };
-  } catch (e) {
-    clistError = errorMessage(e);
+  const clist = await attempt("clist", () => fetchClist(env, nowMs, fetcher));
+  if ("contests" in clist) {
+    await saveSnapshot(env, nowMs, "clist", clist.contests, null);
+    return { contests: clist.contests, fetched: true };
   }
 
-  try {
-    const codeforces = await fetchCodeforces(fetcher);
+  const codeforces = await attempt("codeforces", () => fetchCodeforces(fetcher));
+  if ("contests" in codeforces) {
     const others = previous.filter((c) => c.resource_id !== 1 && utcMs(c.start) > nowMs);
-    const contests = [...codeforces, ...others].sort(byStart);
-    await saveSnapshot(env, nowMs, "codeforces", contests, clistError);
-    return { contests, fetched: true, error: clistError };
+    const contests = [...codeforces.contests, ...others].sort(byStart);
+    await saveSnapshot(env, nowMs, "codeforces", contests, clist.failure.code);
+    return { contests, fetched: true, error: clist.failure.detail };
+  }
+
+  await setMeta(env.DB, "last_fetch_error", `${clist.failure.code}; ${codeforces.failure.code}`).run();
+  return { contests: previous, fetched: false, error: `${clist.failure.detail}; ${codeforces.failure.detail}` };
+}
+
+interface Failure {
+  code: string;
+  detail: string;
+}
+
+type Attempt = { contests: Contest[] } | { failure: Failure };
+
+async function attempt(source: Source, fetch: () => Promise<Contest[]>): Promise<Attempt> {
+  try {
+    return { contests: await fetch() };
   } catch (e) {
-    const error = `${clistError}; ${errorMessage(e)}`;
-    await setMeta(env.DB, "last_fetch_error", error).run();
-    return { contests: previous, fetched: false, error };
+    const detail = errorMessage(e);
+    console.error(`${source} fetch failed: ${detail}`);
+    return { failure: { code: `${source}: ${failureCode(e)}`, detail } };
   }
 }
