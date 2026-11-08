@@ -95,7 +95,7 @@ describe("ensureSnapshot: Codeforces fallback", () => {
 });
 
 describe("ensureSnapshot: total failure", () => {
-  it("keeps the old snapshot and records last_fetch_error", async () => {
+  it("keeps the previous snapshot and records last_fetch_error", async () => {
     const { fetcher: ok } = mockFetch();
     await ensureSnapshot(env, NOW - 2 * 60 * MIN, ok);
     const before = await snapshotRow();

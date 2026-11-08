@@ -89,7 +89,7 @@ describe("runTick: queueing", () => {
     });
   });
 
-  it("keeps queueing from the old snapshot when every source fails", async () => {
+  it("keeps queueing from the previous snapshot when every source fails", async () => {
     const { fetcher: ok } = mockFetch();
     await runTick(env, NOW - 3 * 60 * MIN, ok);
     const { fetcher } = mockFetch({ clist: () => new Response("x", { status: 500 }) });
