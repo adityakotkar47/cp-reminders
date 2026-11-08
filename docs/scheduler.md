@@ -14,7 +14,8 @@ The Worker in `worker/` decides what to send and when, stores every reminder in 
 | `src/tick.ts` | One tick: refresh snapshot, queue due reminders, expire, wake. |
 | `src/reminders.ts` | Claim, ack, lease and expiry SQL. |
 | `src/wake.ts` | `workflow_dispatch` with debounce. |
-| `src/outbox.ts`, `src/admin.ts`, `src/health.ts` | Route handlers and request validation. |
+| `src/outbox.ts`, `src/admin.ts` | Route handlers and request validation. |
+| `src/health.ts`, `src/badge.ts` | `readHealth` (counters and meta) and the two public routes built on it: `/health` and the [status badge](architecture.md#status-badge). |
 | `src/tips.ts`, `src/preview.ts` | Tip overrides from D1, preview rendering. |
 | `src/config.ts` | Imports `config/rules.json` and `config/tips.json`, bundled at deploy. |
 | `migrations/0001_init.sql` | D1 schema. |
@@ -27,6 +28,7 @@ The routes are specified in [architecture.md](architecture.md#worker-http-api). 
 BASE=https://cp-reminders.<your-subdomain>.workers.dev
 
 curl "$BASE/health"
+curl -i "$BASE/badge"            # {"schemaVersion":1,"label":"bot","message":"ok · tick 3m ago","color":"brightgreen"}
 curl -X POST -H "Authorization: Bearer $TICK_TOKEN" "$BASE/tick"
 curl -H "Authorization: Bearer $ADMIN_TOKEN" "$BASE/preview"
 
