@@ -57,20 +57,19 @@ type Ledger interface {
 // Drainer runs one claim, deliver, ack cycle. Zero-valued function fields use
 // the real clock, randomness and sleep.
 type Drainer struct {
-	Outbox           Outbox
-	Dial             Dialer
-	Ledger           Ledger
-	Target           string
-	AllowNonAnnounce bool
-	DryRun           bool
-	Jitter           time.Duration
-	AckTimeout       time.Duration
-	Out              io.Writer
-	Summary          io.Writer
-	Now              func() time.Time
-	Sleep            func(ctx context.Context, d time.Duration) error
-	RandDuration     func(max time.Duration) time.Duration
-	NewClaimID       func() string
+	Outbox       Outbox
+	Dial         Dialer
+	Ledger       Ledger
+	Target       string
+	DryRun       bool
+	Jitter       time.Duration
+	AckTimeout   time.Duration
+	Out          io.Writer
+	Summary      io.Writer
+	Now          func() time.Time
+	Sleep        func(ctx context.Context, d time.Duration) error
+	RandDuration func(max time.Duration) time.Duration
+	NewClaimID   func() string
 }
 
 // Run drains the outbox once. It returns an error if any claimed item was not
@@ -184,7 +183,7 @@ func (d *Drainer) checkTarget(ctx context.Context, sess Session) error {
 	if err != nil {
 		return fmt.Errorf("look up target group: %w", err)
 	}
-	if !g.IsAnnouncements && !d.AllowNonAnnounce {
+	if !g.IsAnnouncements {
 		return fmt.Errorf("group %q: %w", g.Name, ErrNotAnnouncements)
 	}
 	if !g.IsAdmin {

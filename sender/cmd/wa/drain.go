@@ -58,12 +58,11 @@ func newDrainer(args []string, getenv func(string) string, out io.Writer) (*drai
 			}
 			return c, nil
 		},
-		Ledger:           ledger,
-		Target:           target,
-		AllowNonAnnounce: allowNonAnnounce(getenv),
-		DryRun:           *dryRun,
-		Jitter:           *jitter,
-		Out:              out,
+		Ledger: ledger,
+		Target: target,
+		DryRun: *dryRun,
+		Jitter: *jitter,
+		Out:    out,
 	}
 	if path := getenv(envStepSummary); path != "" {
 		d.Summary = appendFile(path)

@@ -25,12 +25,11 @@ import (
 )
 
 const (
-	envIdentity         = "AGE_IDENTITY"
-	envAnnounceJID      = "ANNOUNCE_JID"
-	envAllowNonAnnounce = "ALLOW_NON_ANNOUNCE"
-	envWorkerURL        = "WORKER_URL"
-	envSenderToken      = "SENDER_TOKEN"
-	envStepSummary      = "GITHUB_STEP_SUMMARY"
+	envIdentity    = "AGE_IDENTITY"
+	envAnnounceJID = "ANNOUNCE_JID"
+	envWorkerURL   = "WORKER_URL"
+	envSenderToken = "SENDER_TOKEN"
+	envStepSummary = "GITHUB_STEP_SUMMARY"
 )
 
 var errUsage = errors.New("usage")
@@ -155,8 +154,4 @@ func newVault(identity string) (*state.Vault, error) {
 		return nil, fmt.Errorf("%s: %w", envIdentity, err)
 	}
 	return v, nil
-}
-
-func allowNonAnnounce(getenv func(string) string) bool {
-	return getenv(envAllowNonAnnounce) == "1"
 }

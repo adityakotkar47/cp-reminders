@@ -15,6 +15,7 @@ import (
 
 	"go.mau.fi/whatsmeow/types"
 
+	"cp-reminders/sender/internal/drain"
 	"cp-reminders/sender/internal/outbox"
 	"cp-reminders/sender/internal/state"
 )
@@ -196,11 +197,34 @@ func TestDrainWithoutSessionAcksFailedAndWritesSummary(t *testing.T) {
 	}
 }
 
-func TestAllowNonAnnounce(t *testing.T) {
-	for v, want := range map[string]bool{"1": true, "": false, "0": false, "true": false, "yes": false} {
-		if got := allowNonAnnounce(envMap(map[string]string{envAllowNonAnnounce: v})); got != want {
-			t.Errorf("ALLOW_NON_ANNOUNCE=%q: got %v, want %v", v, got, want)
-		}
+type groupOnlySession struct {
+	group drain.Group
+	sent  []string
+}
+
+func (s *groupOnlySession) Group(context.Context, string) (drain.Group, error) { return s.group, nil }
+
+func (s *groupOnlySession) SendText(_ context.Context, _, text string) (string, error) {
+	s.sent = append(s.sent, text)
+	return "MSG1", nil
+}
+
+func (s *groupOnlySession) Close() error { return nil }
+
+func TestDrainRefusesNonAnnouncementsTargetWhateverTheEnvironment(t *testing.T) {
+	f := newFakeWorker(t, outbox.Item{Key: "k1", Text: "hi", StartUTC: "2026-11-07T14:35:00Z", DeadlineUTC: "2026-11-07T14:25:00Z"})
+	env := f.env(t, map[string]string{"ALLOW_NON_ANNOUNCE": "1"})
+	d, _, err := newDrainer([]string{"--state", t.TempDir(), "--jitter", "0s"}, env, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := &groupOnlySession{group: drain.Group{Name: "General", IsAdmin: true}}
+	d.Dial = func(context.Context) (drain.Session, error) { return sess, nil }
+	if err := d.Run(context.Background()); !errors.Is(err, drain.ErrNotAnnouncements) {
+		t.Fatalf("Run: got %v, want ErrNotAnnouncements", err)
+	}
+	if len(sess.sent) != 0 {
+		t.Errorf("sent to a non-announcements group: %v", sess.sent)
 	}
 }
 

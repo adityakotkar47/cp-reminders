@@ -339,22 +339,9 @@ func TestRefusesNonAnnouncementGroup(t *testing.T) {
 	wantResults(t, h.ack(t).Results, outbox.Result{Key: "k1", Status: outbox.StatusFailed, Error: "announcement"})
 }
 
-func TestAllowNonAnnounceOverride(t *testing.T) {
-	h := newHarness(item("k1", "first"))
-	h.sess.group.IsAnnouncements = false
-	h.d.AllowNonAnnounce = true
-	if err := h.d.Run(context.Background()); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if len(h.sess.sent) != 1 {
-		t.Errorf("sent: %v", h.sess.sent)
-	}
-}
-
-func TestRefusesWhenNotAdminEvenWithOverride(t *testing.T) {
+func TestRefusesWhenNotAdmin(t *testing.T) {
 	h := newHarness(item("k1", "first"))
 	h.sess.group.IsAdmin = false
-	h.d.AllowNonAnnounce = true
 	if err := h.d.Run(context.Background()); !errors.Is(err, ErrNotAdmin) {
 		t.Fatalf("Run: got %v, want ErrNotAdmin", err)
 	}
