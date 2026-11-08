@@ -1,4 +1,5 @@
 import { adminRoutes } from "./admin.ts";
+import { badgeRoute } from "./badge.ts";
 import { healthRoute } from "./health.ts";
 import { json, text } from "./http.ts";
 import { outboxRoutes } from "./outbox.ts";
@@ -9,6 +10,7 @@ const fetcher = (input: string, init?: RequestInit) => fetch(input, init);
 
 const routes: Route[] = [
   healthRoute,
+  badgeRoute,
   {
     method: "POST",
     path: "/tick",
