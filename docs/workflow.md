@@ -49,12 +49,13 @@ The REST reference for [creating a workflow dispatch event](https://docs.github.
 
 ## ci.yml: checks
 
-Runs on push and pull request with `permissions: contents: read` and a concurrency group that cancels superseded runs of the same ref. Three independent jobs:
+Runs on push and pull request with `permissions: contents: read` and a concurrency group that cancels superseded runs of the same ref. Two independent jobs:
 
 | Job | Steps |
 |---|---|
-| `core` | `pnpm/setup` (installs Node 24, pnpm from `packageManager`, and the workspace), then `pnpm test`, `pnpm typecheck`. |
-| `worker` | `pnpm/setup`, then `pnpm --filter cp-reminders-worker typecheck` and `test` (the Workers runtime with a local D1). |
+| `worker` | `pnpm/setup` (installs Node 24, pnpm from the root `packageManager`, and the workspace), then `pnpm --filter cp-reminders-worker typecheck` and `test`. The tests run in the Workers runtime with a local D1 and include the core golden tests in `worker/test/core/`. |
 | `sender` | In `sender/`: `go vet ./...`, `go test ./...`. |
+
+The root `package.json` holds only `name`, `private` and `packageManager`. [`pnpm/setup`](https://github.com/pnpm/setup) reads the pnpm version from `packageManager` and runs `pnpm install` only when a `package.json` is present, so the workspace root keeps that minimal manifest.
 
 Neither workflow needs a secret to run CI.
