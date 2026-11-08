@@ -4,23 +4,23 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	"cp-reminders/sender/internal/outbox"
+	"cp-reminders/sender/internal/reminder"
 )
 
-// Limits applied to every claim.
 const (
-	MaxItems     = 5
-	MaxTextRunes = 1000
+	MaxItems      = 5
+	MaxSentPerDay = 8
 )
 
 const groupServer = "@g.us"
 
-// ErrInvalidTarget is returned when ANNOUNCE_JID is not a group JID.
-var ErrInvalidTarget = errors.New("ANNOUNCE_JID must be a group JID like 120363...@g.us")
+var (
+	ErrInvalidTarget = errors.New("ANNOUNCE_JID must be a group JID like 120363...@g.us")
+	ErrDailyLimit    = fmt.Errorf("daily limit of %d messages in 24 hours reached", MaxSentPerDay)
+)
 
-// ValidateItems returns one error per item, nil for items that may be sent.
 func ValidateItems(items []outbox.Item) []error {
 	errs := make([]error, len(items))
 	if len(items) > MaxItems {
@@ -32,22 +32,23 @@ func ValidateItems(items []outbox.Item) []error {
 	}
 	seen := make(map[string]bool, len(items))
 	for i, it := range items {
-		switch {
-		case it.Key == "":
-			errs[i] = errors.New("empty key")
-		case seen[it.Key]:
-			errs[i] = errors.New("duplicate key in claim")
-		case strings.TrimSpace(it.Text) == "":
-			errs[i] = errors.New("empty text")
-		case utf8.RuneCountInString(it.Text) > MaxTextRunes:
-			errs[i] = fmt.Errorf("text is %d characters, more than the limit of %d", utf8.RuneCountInString(it.Text), MaxTextRunes)
-		}
+		errs[i] = validateItem(it, seen[it.Key])
 		seen[it.Key] = true
 	}
 	return errs
 }
 
-// ValidateTarget checks that jid is a group JID.
+func validateItem(it outbox.Item, duplicate bool) error {
+	switch {
+	case it.Key == "":
+		return errors.New("empty key")
+	case duplicate:
+		return errors.New("duplicate key in claim")
+	}
+	_, err := reminder.Parse(it.Text)
+	return err
+}
+
 func ValidateTarget(jid string) error {
 	user, ok := strings.CutSuffix(jid, groupServer)
 	if !ok || user == "" || strings.Trim(user, "0123456789-") != "" {

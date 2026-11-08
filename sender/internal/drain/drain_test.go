@@ -72,11 +72,12 @@ func (s *fakeSession) Group(ctx context.Context, jid string) (Group, error) {
 }
 
 func (s *fakeSession) SendText(ctx context.Context, jid, text string) (string, error) {
-	s.rec.add("send %s %s", jid, text)
-	if err := s.sendErr[text]; err != nil {
+	body := contestName(text)
+	s.rec.add("send %s %s", jid, body)
+	if err := s.sendErr[body]; err != nil {
 		return "", err
 	}
-	s.sent = append(s.sent, text)
+	s.sent = append(s.sent, body)
 	s.nextID++
 	return fmt.Sprintf("MSG%d", s.nextID), nil
 }
@@ -95,6 +96,16 @@ type fakeLedger struct {
 func (l *fakeLedger) Lookup(key string) (state.Entry, bool) {
 	e, ok := l.entries[key]
 	return e, ok
+}
+
+func (l *fakeLedger) SentSince(t time.Time) int {
+	n := 0
+	for _, e := range l.entries {
+		if e.SentAt.After(t) {
+			n++
+		}
+	}
+	return n
 }
 
 func (l *fakeLedger) Record(e state.Entry) error {
@@ -269,8 +280,8 @@ func TestLedgerHitIsNotResent(t *testing.T) {
 		outbox.Result{Key: "k2", Status: outbox.StatusSent, MessageID: "MSG1"})
 }
 
-func TestInvalidItemsAreFailedOthersSent(t *testing.T) {
-	h := newHarness(item("k1", ""), item("k2", "ok"))
+func TestInvalidItemsAreRejectedOthersSent(t *testing.T) {
+	h := newHarness(rawItem("k1", ""), item("k2", "ok"))
 	err := h.d.Run(context.Background())
 	if err == nil {
 		t.Fatal("Run succeeded with an invalid item")
@@ -279,7 +290,7 @@ func TestInvalidItemsAreFailedOthersSent(t *testing.T) {
 		t.Errorf("sent: %v", h.sess.sent)
 	}
 	wantResults(t, h.ack(t).Results,
-		outbox.Result{Key: "k1", Status: outbox.StatusFailed, Error: "empty text"},
+		outbox.Result{Key: "k1", Status: outbox.StatusRejected, Error: "layout"},
 		outbox.Result{Key: "k2", Status: outbox.StatusSent, MessageID: "MSG1"})
 }
 
@@ -296,7 +307,7 @@ func TestTooManyItemsSendsNothing(t *testing.T) {
 		t.Error("dialled for an oversized claim")
 	}
 	for _, r := range h.ack(t).Results {
-		if r.Status != outbox.StatusFailed {
+		if r.Status != outbox.StatusRejected {
 			t.Errorf("result %+v", r)
 		}
 	}

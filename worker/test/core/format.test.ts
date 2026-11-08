@@ -1,7 +1,10 @@
 import { describe, expect, test } from "vitest";
 import { baseOverrides, rules, tipRules } from "../../src/config.ts";
-import { type Contest, type Tip, formatDuration, formatReminder, formatTime } from "../../src/core/format.ts";
+import { type Contest, type Tip, contestLink, contestName, formatDuration, formatReminder, formatTime } from "../../src/core/format.ts";
 import { type Rules, dueReminders, reminderKey, selectContests } from "../../src/core/select.ts";
+import { MAX_NAME_LENGTH, isSafeText, isValidTip } from "../../src/core/text.ts";
+import contractTexts from "../../../testdata/reminders.json" with { type: "json" };
+import { EDGE_CASES, renderContract } from "../contract.ts";
 import clistHistory from "../fixtures/clist-history.json" with { type: "json" };
 import clistUpcoming from "../fixtures/clist-upcoming.json" with { type: "json" };
 import history from "../fixtures/history.json" with { type: "json" };
@@ -120,6 +123,125 @@ test("template: the bot's text equals the community's latest post for the same c
   const contest = selectContests(all, rules).find((c) => norm(c.href) === norm(field(latest.text, "Contest Link")!))!;
   const withoutTip = (s: string) => s.replace(/\n\n📌 Tip: .*$/, "");
   expect(withoutTip(formatReminder(contest, tipRules, baseOverrides))).toBe(withoutTip(latest.text));
+});
+
+describe("contract with the sender", () => {
+  test("testdata/reminders.json holds the reminders the formatter renders, which the sender's tests check", () => {
+    expect(renderContract()).toEqual(contractTexts);
+  });
+
+  test("every configured tip is valid", () => {
+    const tips = [...tipRules.flatMap((t) => t.texts), ...Object.values(baseOverrides).filter((t) => t !== "")];
+    expect(tips.filter((t) => !isValidTip(t))).toEqual([]);
+  });
+
+  test("the contract set includes the edge-case contests", () => {
+    expect(contractTexts.length).toBe(selectContests(all, rules).length + EDGE_CASES.length);
+  });
+});
+
+describe("contest names are valid free text by construction", () => {
+  const ch = (cp: number) => String.fromCodePoint(cp);
+  const codeforces = all.find((x) => x.resource_id === 1)!;
+  const nameOf = (event: string) => contestName({ ...codeforces, event }).text;
+
+  test("domains and IP addresses are defused until none is left", () => {
+    expect(nameOf("Refact.ai Match 1 (Codeforces Round 985)")).toBe(`Refact${ch(0x2024)}ai Match 1 (Codeforces Round 985)`);
+    expect(nameOf("Round 1.2.3.4.5.6.7")).toBe(`Round 1${ch(0x2024)}2${ch(0x2024)}3${ch(0x2024)}4${ch(0x2024)}5${ch(0x2024)}6${ch(0x2024)}7`);
+    expect(nameOf(`join evil${ch(0xfe52)}com`)).toBe(`join evil${ch(0x2024)}com`);
+    expect(nameOf("Round at evil.कॉम")).toBe(`Round at evil${ch(0x2024)}कॉम`);
+  });
+
+  test("control and format characters are removed and whitespace is collapsed", () => {
+    expect(nameOf(`Round${ch(0x202e)} 5${ch(0x200b)}`)).toBe("Round 5");
+    expect(nameOf(`  Round${ch(0xa0)}${ch(0x3000)}5\tA\nB  `)).toBe("Round 5 A B");
+  });
+
+  test("long names are shortened to the limit in code points", () => {
+    const name = nameOf(ch(0x1f525).repeat(MAX_NAME_LENGTH + 50));
+    expect([...name].length).toBe(MAX_NAME_LENGTH);
+    expect(name.endsWith("…")).toBe(true);
+    expect(nameOf("x".repeat(MAX_NAME_LENGTH))).toBe("x".repeat(MAX_NAME_LENGTH));
+  });
+
+  test("a name that cannot be made safe becomes the platform's fallback name", () => {
+    expect(nameOf("Call 98765 43210 now")).toBe("Codeforces contest");
+    expect(nameOf(`${ch(0x200b)} ${ch(0x202e)}`)).toBe("Codeforces contest");
+  });
+
+  test("says whether the name was replaced by the fallback name", () => {
+    expect(contestName({ ...codeforces, event: "Call 98765 43210 now" })).toEqual({ text: "Codeforces contest", replaced: true });
+    expect(contestName({ ...codeforces, event: "Refact.ai Match 1" }).replaced).toBe(false);
+  });
+
+  test("every edge case renders a safe name", () => {
+    for (const c of EDGE_CASES) expect(isSafeText(contestName(c).text)).toBe(true);
+  });
+});
+
+describe("contest links", () => {
+  const codeforces = all.find((x) => x.resource_id === 1)!;
+
+  const CODEFORCES = "https://codeforces.com/contests/2290";
+  const CODECHEF = "https://www.codechef.com/START264";
+  const ATCODER = "https://atcoder.jp/contests/abc476";
+  const LEETCODE = "https://leetcode.com/contest/weekly-contest-527/";
+
+  test.each([
+    [1, "https://codeforces.com/contests/2290", CODEFORCES],
+    [1, "https://codeforces.com/contest/2290", CODEFORCES],
+    [1, "https://codeforces.com/contest/2290/", CODEFORCES],
+    [1, "http://codeforces.com/contests/2290", CODEFORCES],
+    [1, "https://www.codeforces.com/contest/2290", CODEFORCES],
+    [1, "https://codeforces.com/contest/2290?locale=en#top", CODEFORCES],
+    [2, "https://www.codechef.com/START264", CODECHEF],
+    [2, "https://codechef.com/START264", CODECHEF],
+    [2, "http://www.codechef.com/START264/", CODECHEF],
+    [2, "https://www.codechef.com/START264?itm_campaign=contest_listing#x", CODECHEF],
+    [93, "https://atcoder.jp/contests/abc476", ATCODER],
+    [93, "https://atcoder.jp/contests/abc476/", ATCODER],
+    [93, "http://www.atcoder.jp/contests/abc476?lang=en", ATCODER],
+    [93, "https://atcoder.jp/contests/KeioPC2025", "https://atcoder.jp/contests/KeioPC2025"],
+    [102, "https://leetcode.com/contest/weekly-contest-527", LEETCODE],
+    [102, "https://leetcode.com/contest/weekly-contest-527/", LEETCODE],
+    [102, "http://www.leetcode.com/contest/weekly-contest-527?tab=ranking#top", LEETCODE],
+  ])("resource %i: %s → %s", (resource_id, href, want) => {
+    expect(contestLink({ ...codeforces, resource_id, href })).toBe(want);
+  });
+
+  test.each([
+    [1, "https://codeforces.com/blog/entry/150813"],
+    [1, "https://codeforces.com/contest/2290/problem/A"],
+    [1, "https://m1.codeforces.com/contest/2290"],
+    [1, "https://codeforces.com.evil.test/contest/2290"],
+    [1, "https://user@codeforces.com/contest/2290"],
+    [1, "https://codeforces.com:8443/contest/2290"],
+    [1, "ftp://codeforces.com/contest/2290"],
+    [1, "codeforces.com/contest/2290"],
+    [2, "https://www.codechef.com/START264/rankings"],
+    [2, "https://www.codechef.com/"],
+    [93, "https://atcoder.jp/contests/abc476/tasks"],
+    [93, `https://atcoder.jp/contests/${"a".repeat(200)}`],
+    [102, "https://leetcode.com/contest/weekly-contest-527/ranking"],
+    [102, "https://leetcode.com/contest/Weekly-Contest-527"],
+    [7, "https://codeforces.com/contest/2290"],
+  ])("resource %i: %s has no contest link", (resource_id, href) => {
+    expect(contestLink({ ...codeforces, resource_id, href })).toBeUndefined();
+  });
+
+  test("every fixture contest that is selected has a link", () => {
+    expect(selectContests(all, rules).filter((c) => contestLink(c) === undefined)).toEqual([]);
+  });
+
+  test("selection does not depend on the contest link", () => {
+    const blog = { ...codeforces, event: "Codeforces Round 999 (Div. 2)", href: "https://codeforces.com/blog/entry/150813" };
+    expect(selectContests([blog], rules)).toEqual([blog]);
+  });
+
+  test("a contest without a contest link cannot be rendered", () => {
+    const blog = { ...codeforces, href: "https://codeforces.com/blog/entry/150813" };
+    expect(() => formatReminder(blog)).toThrow(/no Codeforces contest link/);
+  });
 });
 
 test("time and duration helpers", () => {

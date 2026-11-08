@@ -1,4 +1,4 @@
-import { type Contest, PLATFORM, utcMs } from "./format.ts";
+import { type Contest, PLATFORM, contestLink, utcMs } from "./format.ts";
 
 export interface Rules {
   include: Record<string, string[]>;
@@ -44,4 +44,10 @@ export function dueReminders(list: readonly Contest[], rules: Rules, nowMs: numb
     const start = utcMs(c.start);
     return nowMs >= start - rules.leadMinutes * 60_000 && nowMs <= start - rules.minLeadMinutes * 60_000;
   });
+}
+
+export function unlinkedContests(list: readonly Contest[], rules: Rules, nowMs: number): Contest[] {
+  return selectContests(list, rules).filter(
+    (c) => nowMs <= utcMs(c.start) - rules.minLeadMinutes * 60_000 && contestLink(c) === undefined,
+  );
 }

@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MAX_TIP_LENGTH } from "../src/admin.ts";
+import { MAX_TIP_LENGTH } from "../src/core/text.ts";
 import { baseOverrides, rules, tipRules } from "../src/config.ts";
 import { formatReminder, formatTime, isoUtc, istClock } from "../src/core/format.ts";
 import { PREVIEW_LIMIT } from "../src/preview.ts";
@@ -53,6 +53,10 @@ describe("PUT /tips", () => {
     expect((await tipRow(HREF))?.tip).toBe("hydrate");
   });
 
+  it("accepts punctuation that is not a link", async () => {
+    expect((await request("PUT", "/tips", { href: HREF, tip: "e.g. read all problems first... then A." })).status).toBe(200);
+  });
+
   it("stores an empty tip to suppress the tip for that contest", async () => {
     expect((await request("PUT", "/tips", { href: HREF, tip: "" })).status).toBe(200);
     expect((await tipRow(HREF))?.tip).toBe("");
@@ -65,9 +69,23 @@ describe("PUT /tips", () => {
     ["missing tip", { href: HREF }],
     ["non-string tip", { href: HREF, tip: 4 }],
     ["oversized tip", { href: HREF, tip: "x".repeat(MAX_TIP_LENGTH + 1) }],
+    ["tip with a line break", { href: HREF, tip: "first line\nsecond line" }],
+    ["tip with a carriage return", { href: HREF, tip: "first line\rsecond line" }],
+    ["tip with a unicode line separator", { href: HREF, tip: `first line${String.fromCodePoint(0x2028)}second line` }],
+    ["tip with a link", { href: HREF, tip: "see https://example.com/x" }],
+    ["tip with a link to an allowed host", { href: HREF, tip: "see https://codeforces.com/blog" }],
+    ["tip with a bare domain", { href: HREF, tip: "join evil.com today" }],
+    ["tip with a phone number", { href: HREF, tip: "dm +91 98765 43210" }],
+    ["tip with an IP address", { href: HREF, tip: "203.0.113.5/x" }],
+    ["tip of only spaces", { href: HREF, tip: "   " }],
   ])("rejects %s with 400", async (_name, body) => {
     expect((await request("PUT", "/tips", body)).status).toBe(400);
     expect(await tipRow(HREF)).toBeNull();
+  });
+
+  it("states the tip limit in code points", async () => {
+    const res = await request("PUT", "/tips", { href: HREF, tip: "join evil.com" });
+    expect(await res.text()).toContain(`up to ${MAX_TIP_LENGTH} code points`);
   });
 });
 
@@ -106,6 +124,14 @@ describe("GET /preview", () => {
     stub();
     await request("PUT", "/tips", { href: HREF, tip: "bring snacks" });
     expect(await (await request("GET", "/preview")).text()).toContain("📌 Tip: bring snacks");
+  });
+
+  it("shows a contest without a contest link as a reminder that will fail", async () => {
+    const unlinked = { ...TARGET, href: `${TARGET.href.replace(/\/$/, "")}/ranking/page` };
+    const mock = mockFetch({ clist: () => new Response(JSON.stringify({ objects: [unlinked] }), { status: 200 }) });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => mock.fetcher(String(input), init));
+    const body = await (await request("GET", "/preview")).text();
+    expect(body).toMatch(/^#1  sends .+ IST\n\nNo contest link in .+ranking\/page: this reminder will be recorded as failed \(no_contest_link\)\.\n$/);
   });
 
   it("says so when nothing is scheduled", async () => {
