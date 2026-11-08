@@ -2,6 +2,7 @@ import { type Contest, PLATFORM, utcMs } from "./format.ts";
 
 export interface Rules {
   include: Record<string, string[]>;
+  exclude?: Record<string, string[]>;
   maxDurationHours: number;
   mergeCodeforcesDivs: boolean;
   leadMinutes: number;
@@ -18,8 +19,8 @@ function isPureDiv(c: Contest, div: 1 | 2): boolean {
 function matchesRules(c: Contest, rules: Rules): boolean {
   const platform = PLATFORM[c.resource_id];
   if (!platform || c.duration > rules.maxDurationHours * 3600) return false;
-  const patterns = rules.include[platform] ?? [];
-  return patterns.some((p) => new RegExp(p, "i").test(c.event));
+  const matches = (patterns: string[] | undefined) => (patterns ?? []).some((p) => new RegExp(p, "i").test(c.event));
+  return matches(rules.include[platform]) && !matches(rules.exclude?.[platform]);
 }
 
 function mergeCodeforcesDivs(contests: Contest[]): Contest[] {

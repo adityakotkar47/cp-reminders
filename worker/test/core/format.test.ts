@@ -78,6 +78,27 @@ describe("selection", () => {
     expect(selected.some((n) => n.startsWith("Placement Prep"))).toBe(false);
   });
 
+  test("drops contests matching their platform's exclude patterns", () => {
+    const codeforces = (event: string): Contest => ({
+      resource_id: 1,
+      event,
+      start: "2026-12-27T14:35:00",
+      duration: 3 * 3600,
+      href: `https://codeforces.com/contests/${event.length}`,
+    });
+    const r: Rules = {
+      ...TEST_RULES,
+      include: { ...TEST_RULES.include, Codeforces: ["."] },
+      exclude: { Codeforces: ["Kotlin Heroes", "Unrated", "April Fools"] },
+    };
+    const kept = selectContests(
+      ["Hello 2026", "Good Bye 2025", "Pinely Round 5 (Div. 1 + Div. 2)", "Kotlin Heroes: Episode 13",
+        "Testing Round 20 (Unrated, Communication Problems)", "April Fools Day Contest 2026"].map(codeforces),
+      r,
+    ).map((c) => c.event);
+    expect(kept).toEqual(["Hello 2026", "Good Bye 2025", "Pinely Round 5 (Div. 1 + Div. 2)"]);
+  });
+
   test("drops events longer than maxDurationHours", () => {
     const selected = names(TEST_RULES);
     expect(selected).toContain("Kotlin Heroes: Episode 15");
