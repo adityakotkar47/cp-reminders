@@ -121,12 +121,11 @@ test("due window: from leadMinutes before the start until minLeadMinutes before 
   expect(dueReminders([c], TEST_RULES, at(TEST_RULES.minLeadMinutes) + 1000)).toHaveLength(0);
 });
 
-test("reminder key is source-independent and changes on reschedule", () => {
+test("reminder key identifies the contest, whatever its source or start time", () => {
   const c = byEvent("Starters 264");
-  const fromFallback = { ...c, start: `${c.start}Z` };
-  expect(reminderKey(fromFallback)).toBe(reminderKey(c));
-  expect(reminderKey({ ...c, start: "2026-11-11T14:45:00" })).not.toBe(reminderKey(c));
-  expect(reminderKey(c)).toBe("2|https://www.codechef.com/START264|2026-11-11T14:30:00.000Z");
+  expect(reminderKey({ ...c, start: `${c.start}Z` })).toBe(reminderKey(c));
+  expect(reminderKey({ ...c, start: "2026-11-11T14:45:00" })).toBe(reminderKey(c));
+  expect(reminderKey(c)).toBe("2|https://www.codechef.com/START264");
 });
 
 describe("tips", () => {

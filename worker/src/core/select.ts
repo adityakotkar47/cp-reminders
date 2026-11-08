@@ -1,4 +1,4 @@
-import { type Contest, PLATFORM, isoUtc, utcMs } from "./format.ts";
+import { type Contest, PLATFORM, utcMs } from "./format.ts";
 
 export interface Rules {
   include: Record<string, string[]>;
@@ -36,8 +36,7 @@ export function selectContests(list: readonly Contest[], rules: Rules): Contest[
   return rules.mergeCodeforcesDivs ? mergeCodeforcesDivs(kept) : kept;
 }
 
-export const reminderKey = (c: Contest): string =>
-  `${c.resource_id}|${c.href}|${isoUtc(utcMs(c.start))}`;
+export const reminderKey = (c: Contest): string => `${c.resource_id}|${c.href}`;
 
 export function dueReminders(list: readonly Contest[], rules: Rules, nowMs: number): Contest[] {
   return selectContests(list, rules).filter((c) => {

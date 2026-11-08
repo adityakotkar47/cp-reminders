@@ -78,14 +78,23 @@ describe("runTick: queueing", () => {
     expect(await getReminder(TARGET_KEY)).toMatchObject({ status: "sent", text: "original" });
   });
 
-  it("gives a rescheduled contest a new reminder", async () => {
+  it("sends no second reminder for a contest rescheduled after its reminder", async () => {
     const movedStart = TARGET_START + 15 * MIN;
     const rescheduled = { ...targetInFixtures, start: isoUtc(movedStart).slice(0, 19) };
-    await seedReminder({ key: TARGET_KEY, status: "sent", attempts: 1 });
+    await seedReminder({ key: TARGET_KEY, status: "sent", attempts: 1, text: "original" });
     const { fetcher } = onlyContests(rescheduled);
+    expect((await runTick(env, movedStart - rules.leadMinutes * MIN, fetcher)).queued).toBe(0);
+    expect(await count()).toBe(1);
+    expect(await getReminder(TARGET_KEY)).toMatchObject({ status: "sent", text: "original" });
+  });
+
+  it("reminds a contest rescheduled before its reminder at the new time", async () => {
+    const movedStart = TARGET_START + 60 * MIN;
+    const rescheduled = { ...targetInFixtures, start: isoUtc(movedStart).slice(0, 19) };
+    const { fetcher } = onlyContests(rescheduled);
+    expect((await runTick(env, NOW, fetcher)).queued).toBe(0);
     expect((await runTick(env, movedStart - rules.leadMinutes * MIN, fetcher)).queued).toBe(1);
-    expect(await count()).toBe(2);
-    expect(await getReminder(reminderKey(rescheduled))).toMatchObject({ status: "queued" });
+    expect(await getReminder(reminderKey(rescheduled))).toMatchObject({ start_utc: isoUtc(movedStart), status: "queued" });
   });
 
   it("keeps queueing from the previous snapshot when every source fails", async () => {
