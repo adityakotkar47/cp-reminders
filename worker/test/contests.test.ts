@@ -37,7 +37,7 @@ describe("ensureSnapshot: clist", () => {
     const row = await snapshotRow();
     expect(row?.source).toBe("clist");
     expect(row?.fetched_at).toBe("2026-11-11T13:20:00.000Z");
-    expect(Object.keys(JSON.parse(row!.payload)[0]).sort()).toEqual(["duration", "event", "href", "id", "resource_id", "start"]);
+    expect(Object.keys(JSON.parse(row!.payload)[0]).sort()).toEqual(["duration", "event", "href", "resource_id", "start"]);
     expect(await metaValue("last_fetch_at")).toBe("2026-11-11T13:20:00.000Z");
     expect(await metaValue("last_fetch_source")).toBe("clist");
     expect(await metaValue("last_fetch_error")).toBeNull();
@@ -70,7 +70,6 @@ describe("ensureSnapshot: Codeforces fallback", () => {
     const cf = result.contests.filter((c) => c.resource_id === 1);
     expect(cf).toEqual([
       {
-        id: 9001,
         resource_id: 1,
         event: "Codeforces Round 9001 (Div. 2)",
         start: new Date(start * 1000).toISOString().slice(0, 19),

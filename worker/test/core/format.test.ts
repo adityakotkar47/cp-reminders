@@ -89,7 +89,7 @@ test("due window: fires from start-75m, not when start is <10m away", () => {
 
 test("reminder key is source-independent and changes on reschedule", () => {
   const c = upcoming.find((x) => x.event === "Starters 264")!;
-  const fromFallback = { ...c, id: -1, start: `${c.start}Z` };
+  const fromFallback = { ...c, start: `${c.start}Z` };
   expect(reminderKey(fromFallback)).toBe(reminderKey(c));
   expect(reminderKey({ ...c, start: "2026-11-11T14:45:00" })).not.toBe(reminderKey(c));
   expect(reminderKey(c)).toBe("2|https://www.codechef.com/START264|2026-11-11T14:30:00.000Z");

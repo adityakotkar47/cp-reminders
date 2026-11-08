@@ -1,5 +1,4 @@
 export interface Contest {
-  id: number;
   resource_id: number;
   event: string;
   start: string;

@@ -42,8 +42,7 @@ async function fetchClist(env: Env, nowMs: number, fetcher: Fetcher): Promise<Co
   });
   if (!res.ok) throw new Error(`clist HTTP ${res.status}`);
   const body = (await res.json()) as { objects?: Contest[] };
-  const contests = (body.objects ?? []).map(({ id, resource_id, event, start, duration, href }) => ({
-    id,
+  const contests = (body.objects ?? []).map(({ resource_id, event, start, duration, href }) => ({
     resource_id,
     event,
     start,
@@ -65,7 +64,6 @@ async function fetchCodeforces(fetcher: Fetcher): Promise<Contest[]> {
   for (const c of body.result) {
     if (c.phase !== "BEFORE" || c.startTimeSeconds === undefined) continue;
     contests.push({
-      id: c.id,
       resource_id: 1,
       event: c.name,
       start: isoNoZ(c.startTimeSeconds * 1000),
