@@ -41,7 +41,7 @@ The bot posts a reminder for each selected programming contest into the Announce
 | Everything runs on free tiers: Cloudflare Workers and D1 schedule, GitHub Actions sends. | $0 with no card. | GitHub's terms exclude runners for work "unrelated to" the software project, which a notifier arguably is; runners connect from datacenter addresses, which reports associate with more WhatsApp restrictions ([research](research/free-hosting.md)). |
 | A failed send is retried by later runs until the deadline, then reported; there is no paid fallback. | Most failures (a slow connection, a dropped run) clear on the next run. | When the session is logged out, every reminder misses until the number is paired again; the failure email carries each text to post by hand. |
 | The bot covers contests on Codeforces, CodeChef, LeetCode and AtCoder only. Other events (college contests, hackathons, other platforms) are posted by hand. | Those events are one-offs with registration details that differ each time; the community posted a handful in 15 months. | Someone has to post them; they do not appear in `/preview`. |
-| The repository is private. | Workflow logs show the bot's number and run details; the `state` branch holds the encrypted session. | GitHub's CI badge is visible only to people with access to the repository. |
+| The code is public in `mitaoe/cp-reminders`, where anyone can propose changes. The bot runs from a fork, the deployment repository, which alone holds its secrets and branch `state`; syncing the fork releases merged changes. | Contributions go through the organisation's review, and no secret or session is reachable from the repository people contribute to: anyone with write access to a repository can run its workflows from their own branch, and a workflow can read every secret of its repository. Run logs contain no phone number, chat ID or secret. | Whatever is synced into the fork runs with the bot's secrets, so changes to workflows and to the sender are reviewed before syncing. `session.db.age` is publicly downloadable from the fork, and stays unreadable without `AGE_IDENTITY`. |
 
 ## Components
 
@@ -70,7 +70,7 @@ flowchart LR
 | Core (`worker/src/core/`) | Pure functions: select contests, decide which reminders are due, render the text. | Performs I/O. |
 | Worker (`worker/`) | Fetches and caches contests, queues due reminders, wakes the sender, serves the outbox, reports health and a status badge. | Talks to WhatsApp or knows the target chat. |
 | Sender (`sender/`) | Claims queued reminders, posts them to the one allowed chat, reports results, saves the WhatsApp session. | Decides what to send or when, or accepts a destination over the network. |
-| Workflow (`.github/workflows/send.yml`) | Runs the sender with its secrets, one run at a time, and saves its state. | Carries message text: the dispatch is only a wake-up. |
+| Workflows (`.github/workflows/`) | In the deployment repository: `send.yml` runs the sender with its secrets, one run at a time, and saves its state; `deploy.yml` deploys the Worker. In every repository: `ci.yml` runs the checks. | Carry message text: the dispatch is only a wake-up. |
 
 ## Design decisions
 
@@ -78,9 +78,9 @@ flowchart LR
 2. **State lives in D1, not KV.** Deduplication and claiming need atomic, read-your-writes operations: `INSERT … ON CONFLICT DO NOTHING`, `UPDATE … RETURNING`, and `batch()`, which runs as one transaction [4]. KV changes can take 60 seconds or more to reach other locations [5], and its free tier allows 1,000 writes a day. D1's documentation promises general SQLite compatibility rather than these statements by name [6], so the Worker tests run them against the local D1 engine.
 3. **Contests have a natural identity.** A contest is `(resource_id, href)`, the same whichever source supplied it, and a reminder's key is `resource_id|href`, so a contest is reminded at most once, even when its start time changes.
 4. **Text is rendered once, when the reminder is queued.** The stored text is exactly what is sent, which makes the outbox an audit log.
-5. **Only the sender knows the destination.** `ANNOUNCE_JID` is a GitHub secret. The sender refuses any chat that is not a community announcements group in which it is admin. A compromised Worker can at most post text into Announcements, five messages per run.
+5. **Only the sender knows the destination.** `ANNOUNCE_JID` is a secret of the deployment repository. The sender refuses any chat that is not a community announcements group in which it is admin. A compromised Worker can at most post text into Announcements, five messages per run.
 6. **Two independent guards against duplicates.** D1's primary key on the reminder key, and the sender's own `sent.json`, which covers a message that was sent but whose acknowledgement was lost.
-7. **The session lives on a single-commit branch.** Branch `state` holds `session.db.age` and `sent.json`. Each run force-pushes one commit with a lease check, so the repository does not grow, and the workflow's concurrency group serialises the writes.
+7. **The session lives on a single-commit branch.** Branch `state` of the deployment repository holds `session.db.age` and `sent.json`. Each run force-pushes one commit with a lease check, so the repository does not grow, and the workflow's concurrency group serialises the writes.
 
 ## Data
 
@@ -147,7 +147,7 @@ A row holds the latest state, not a history of every transition: a reminder that
 
 | File | Content |
 |---|---|
-| `session.db.age` | The WhatsApp login: the whatsmeow SQLite store, encrypted with age. The decryption key is the GitHub secret `AGE_IDENTITY`, never stored in the repository, so the file is unreadable without it. Each run decrypts it, connects, and commits the re-encrypted file, because the keys inside change on every connection. |
+| `session.db.age` | The WhatsApp login: the whatsmeow SQLite store, encrypted with age. The decryption key is the secret `AGE_IDENTITY`, never stored in a repository, so the file is unreadable without it. Each run decrypts it, connects, and commits the re-encrypted file, because the keys inside change on every connection. |
 | `sent.json` | The last 500 reminders this sender delivered: `{key, sentAt, messageId}`. Not secret. |
 
 ### Secrets
@@ -155,15 +155,16 @@ A row holds the latest state, not a history of every transition: a reminder that
 | Stored in | Name | Use |
 |---|---|---|
 | Worker | `CLIST_USERNAME`, `CLIST_API_KEY` | clist API |
-| Worker | `GH_TOKEN` | Fine-grained token limited to this repository with Actions read and write; dispatches `send.yml`. |
+| Worker | `GH_TOKEN` | Fine-grained token limited to the deployment repository with Actions read and write; dispatches `send.yml`. |
 | Worker | `TICK_TOKEN` | `POST /tick` |
 | Worker | `ADMIN_TOKEN` | `GET /preview`, `PUT /tips`, `DELETE /tips` |
-| Worker and GitHub | `SENDER_TOKEN` | `/outbox/claim`, `/outbox/ack` |
-| GitHub | `WORKER_URL` | Base URL of the Worker |
-| GitHub | `AGE_IDENTITY` | Decrypts and encrypts the session |
-| GitHub | `ANNOUNCE_JID` | The only chat the sender may post to |
+| Worker and deployment repository | `SENDER_TOKEN` | `/outbox/claim`, `/outbox/ack` |
+| Deployment repository | `WORKER_URL` | Base URL of the Worker |
+| Deployment repository | `AGE_IDENTITY` | Decrypts and encrypts the session |
+| Deployment repository | `ANNOUNCE_JID` | The only chat the sender may post to |
+| Deployment repository | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | `deploy.yml`: an API token from Cloudflare's "Edit Cloudflare Workers" template with D1 Edit added, and the account ID |
 
-Every token has one purpose and is compared in constant time.
+Every token has one purpose and is compared in constant time. The deployment repository also has the variable `BOT_DEPLOYMENT=true`, which enables `send.yml` and `deploy.yml`; `mitaoe/cp-reminders` has no secrets and no such variable. The Worker's `vars.GH_REPO` in `wrangler.jsonc` names the deployment repository.
 
 ## Interfaces
 
@@ -269,7 +270,7 @@ sequenceDiagram
 | D1 rows written | about 24 snapshot refreshes, a few reminder transitions, 288 tick timestamps | 100,000 |
 | D1 rows read | about 2,000 | 5,000,000 |
 | clist requests | at most 24 | 10 a minute |
-| GitHub Actions | 1–4 runs of under a minute each | 2,000 minutes a month (private repository) |
+| GitHub Actions | 1–4 send runs of under a minute each, plus a deploy per release | Unlimited minutes on standard runners for public repositories |
 
 ## Repository layout
 
@@ -283,7 +284,7 @@ worker/              Cloudflare Worker (pnpm workspace package)
   test/core/         rule tests and golden tests against the manual reminder history
   test/fixtures/     frozen clist data and the community's manual reminders, August 2025 to November 2026
 sender/              Go module: cmd/wa, internal/{drain,outbox,state,wa}
-.github/workflows/   send.yml (drain the outbox), ci.yml (checks on push)
+.github/workflows/   send.yml (drain the outbox), deploy.yml (deploy the Worker), ci.yml (checks)
 docs/                architecture, formatter, scheduler, sender, workflow
 docs/research/       research behind the design
 ```

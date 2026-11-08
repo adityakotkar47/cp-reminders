@@ -59,18 +59,18 @@ Message text appears only in `--dry-run` output and in the failure summary, neve
 
 The paired number must be an admin of the community so that it can post in Announcements, and its phone must open WhatsApp at least every 14 days: linked devices are logged out after 14 days without the phone being used ([WhatsApp FAQ](https://faq.whatsapp.com/378279804439436/)).
 
-1. Create the key once with `go -C sender run ./cmd/wa keygen`. Store the `AGE-SECRET-KEY-1…` line as the GitHub secret `AGE_IDENTITY` and in a password manager; never commit it.
+1. Create the key once with `go -C sender run ./cmd/wa keygen`. Store the `AGE-SECRET-KEY-1…` line as the secret `AGE_IDENTITY` of the deployment repository (`gh secret set AGE_IDENTITY --repo adityakotkar47/cp-reminders`) and in a password manager; never commit it.
 2. Put it in the shell without writing it to history:
    - bash: `read -rs AGE_IDENTITY && export AGE_IDENTITY`
    - PowerShell 7: `$env:AGE_IDENTITY = Read-Host -MaskInput AGE_IDENTITY`
-3. Check out branch `state` in a separate worktree so the session never lands on `main`: `git worktree add ../cp-reminders-state state`, or `git worktree add --orphan -b state ../cp-reminders-state` when the branch does not exist.
+3. Check out branch `state` of the deployment repository in a separate worktree so the session never lands on `main`. With that repository as remote `fork`: `git fetch fork state:state` and `git worktree add ../cp-reminders-state state`, or `git worktree add --orphan -b state ../cp-reminders-state` when the branch does not exist.
 4. Pair, by QR code or by pairing code:
    - `go -C sender run ./cmd/wa pair --state ../../cp-reminders-state`, then on the phone: Linked devices → Link a device, and scan. Codes rotate; the window closes after about 160 seconds.
    - `go -C sender run ./cmd/wa pair --state ../../cp-reminders-state --phone 91XXXXXXXXXX` (international format without `+`), then on the phone: Linked devices → Link a device → Link with phone number instead, and enter the printed code.
 
    Add `--force` when the worktree already holds a session, and remove the previous device from the phone's linked devices first. Wait for `session saved to …`.
-5. Find the Announcements JID with `go -C sender run ./cmd/wa groups --state ../../cp-reminders-state` ([below](#announcements-jid)) and store it as the GitHub secret `ANNOUNCE_JID`.
-6. Commit `session.db.age` on branch `state`, push it, and remove the worktree with `git worktree remove ../cp-reminders-state`. Only the workflow may use the session from then on: two clients with the same keys end in `StreamReplaced`.
+5. Find the Announcements JID with `go -C sender run ./cmd/wa groups --state ../../cp-reminders-state` ([below](#announcements-jid)) and store it as the secret `ANNOUNCE_JID` of the deployment repository.
+6. Commit `session.db.age` on branch `state`, push it to the deployment repository (`git push fork state`), and remove the worktree with `git worktree remove ../cp-reminders-state`. Only the workflow may use the session from then on: two clients with the same keys end in `StreamReplaced`.
 
 ## Announcements JID
 

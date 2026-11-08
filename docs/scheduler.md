@@ -60,9 +60,9 @@ The second `PUT` suppresses the tip for that contest; the `DELETE` removes the o
 
 ## Deployment
 
-Commands run in `worker/` with the Cloudflare account logged in (`pnpm exec wrangler login`).
+Releases are deployed by `deploy.yml` in the deployment repository when the fork is synced ([workflow.md](workflow.md#deployyml-deploy-the-worker)). The first deployment of a new Worker is done by hand, with commands run in `worker/` and the Cloudflare account logged in (`pnpm exec wrangler login`):
 
-1. Create the database with `pnpm exec wrangler d1 create cp-reminders` and put its `database_id` in `wrangler.jsonc`; `vars.GH_REPO` names this repository.
+1. Create the database with `pnpm exec wrangler d1 create cp-reminders` and put its `database_id` in `wrangler.jsonc`; `vars.GH_REPO` names the deployment repository.
 2. Apply the schema: `pnpm run db:migrate:remote`.
 3. Deploy with the secrets. `wrangler.jsonc` lists them under `secrets.required`, and `wrangler deploy` fails while any is missing ([secrets](https://developers.cloudflare.com/workers/configuration/secrets/)), so the first deploy passes them in a JSON file kept outside the repository:
 
@@ -70,7 +70,7 @@ Commands run in `worker/` with the Cloudflare account logged in (`pnpm exec wran
    pnpm exec wrangler deploy --secrets-file /path/to/secrets.json
    ```
 
-   The file holds the Worker secrets listed in [architecture.md](architecture.md#secrets). `TICK_TOKEN`, `ADMIN_TOKEN` and `SENDER_TOKEN` are distinct random values (`openssl rand -base64 32`); `SENDER_TOKEN` is also a GitHub secret. Later deploys keep the stored secrets, so `pnpm run deploy` is enough, and a single secret changes with `pnpm exec wrangler secret put <NAME>`.
+   The file holds the Worker secrets listed in [architecture.md](architecture.md#secrets). `TICK_TOKEN`, `ADMIN_TOKEN` and `SENDER_TOKEN` are distinct random values (`openssl rand -base64 32`); `SENDER_TOKEN` is also a secret of the deployment repository. Later deploys, by `deploy.yml` or by `pnpm run deploy`, keep the stored secrets, and a single secret changes with `pnpm exec wrangler secret put <NAME>`.
 
 4. Check `/health`, `/preview` and `POST /tick` with the commands above. A new cron trigger can take up to 15 minutes to start firing ([cron triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/)).
 
