@@ -13,33 +13,41 @@ import (
 )
 
 func runDrain(ctx context.Context, args []string, getenv func(string) string, out io.Writer) error {
+	d, timeout, err := newDrainer(args, getenv, out)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return d.Run(ctx)
+}
+
+func newDrainer(args []string, getenv func(string) string, out io.Writer) (*drain.Drainer, time.Duration, error) {
 	f := newFlags("drain", out, true)
 	jitter := f.Duration("jitter", 90*time.Second, "random delay before connecting, up to this long")
 	dryRun := f.Bool("dry-run", false, "connect and verify the target, print texts, but do not send, record or ack")
 	timeout := f.Duration("timeout", 4*time.Minute, "limit for the whole run")
 	connectTimeout := f.Duration("connect-timeout", 60*time.Second, "limit for connecting to WhatsApp")
 	if err := f.parse(args); err != nil {
-		return err
+		return nil, 0, err
 	}
 	env, err := requireEnv(getenv, envWorkerURL, envSenderToken, envIdentity, envAnnounceJID)
 	if err != nil {
-		return err
+		return nil, 0, err
 	}
 	workerURL, token, identity, target := env[0], env[1], env[2], env[3]
 	v, err := newVault(identity)
 	if err != nil {
-		return err
+		return nil, 0, err
 	}
 	if err := drain.ValidateTarget(target); err != nil {
-		return err
+		return nil, 0, err
 	}
 	ledger, err := state.LoadLedger(filepath.Join(*f.state, state.LedgerFile))
 	if err != nil {
-		return err
+		return nil, 0, err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, *timeout)
-	defer cancel()
 	log := f.logger()
 	d := &drain.Drainer{
 		Outbox: outbox.New(workerURL, token),
@@ -60,7 +68,7 @@ func runDrain(ctx context.Context, args []string, getenv func(string) string, ou
 	if path := getenv(envStepSummary); path != "" {
 		d.Summary = appendFile(path)
 	}
-	return d.Run(ctx)
+	return d, *timeout, nil
 }
 
 type appendFile string
