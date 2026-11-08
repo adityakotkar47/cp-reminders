@@ -40,9 +40,6 @@ func newDrainer(args []string, getenv func(string) string, out io.Writer) (*drai
 	if err != nil {
 		return nil, 0, err
 	}
-	if err := drain.ValidateTarget(target); err != nil {
-		return nil, 0, err
-	}
 	ledger, err := state.LoadLedger(filepath.Join(*f.state, state.LedgerFile))
 	if err != nil {
 		return nil, 0, err
