@@ -6,12 +6,15 @@
 
 The same files exist in `mitaoe/cp-reminders` and in its fork, the deployment repository ([README](../README.md#where-it-runs)).
 
-| Workflow | Runs in | Condition |
-|---|---|---|
-| `ci.yml` | Every repository | Always |
-| `send.yml`, `deploy.yml` | The deployment repository only | The repository variable `BOT_DEPLOYMENT` is `true` |
+| File | Workflow | Jobs (id: name) | Runs in | Condition |
+|---|---|---|---|---|
+| `ci.yml` | CI | `worker`: Worker Type Check and Tests; `sender`: Sender Vet and Tests | Every repository | Always |
+| `send.yml` | Send Reminders | `drain`: Drain Outbox | The deployment repository only | The repository variable `BOT_DEPLOYMENT` is `true` |
+| `deploy.yml` | Deploy Worker | `check`: Type Check and Tests; `deploy`: Deploy to Cloudflare | The deployment repository only | The repository variable `BOT_DEPLOYMENT` is `true` |
 
-Both bot workflows check the variable at job level, so in any other repository, including `mitaoe/cp-reminders` and forks made by contributors, their job is skipped rather than failing for want of secrets. Which repository runs the bot is therefore a repository setting, not a name in the code. Workflows in a new fork run only after Actions is enabled in its Actions tab ([forks](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository)).
+The Worker dispatches `send.yml` and the README's CI badge points at `ci.yml`, both by file name; renaming a workflow changes only the badge's label.
+
+Every job of the two bot workflows checks the variable, so in any other repository, including `mitaoe/cp-reminders` and forks made by contributors, those jobs are skipped rather than failing for want of secrets. Which repository runs the bot is therefore a repository setting, not a name in the code. Workflows in a new fork run only after Actions is enabled in its Actions tab ([forks](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository)).
 
 ## send.yml: drain the outbox
 
