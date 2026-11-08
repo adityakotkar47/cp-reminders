@@ -1,6 +1,11 @@
 # Formatter and selection rules
 
-`worker/src/core/format.ts` turns a clist contest into the exact reminder text. `worker/src/core/select.ts` decides which contests get a reminder and when. Both are pure (no I/O); the Worker calls them when it queues a reminder, and the golden tests below cover the same code.
+Two pure modules decide what the bot says and about which contests:
+
+- `worker/src/core/select.ts` picks the contests that get a reminder and decides when each reminder is due.
+- `worker/src/core/format.ts` renders a contest into the reminder text.
+
+The Worker calls both when it queues a reminder ([architecture.md](architecture.md#tick-workers-cron-every-5-minutes)).
 
 ## Message format
 
@@ -13,51 +18,48 @@
 ⏳ Duration: 2:15 hours
 🔗 Contest Link: https://codeforces.com/contests/2267
 
-📌 Tip: ...            (only when a tip applies)
+📌 Tip: …
 ```
 
-Conventions, all taken from the 34 manual reminders in the community's history:
+The tip line and the blank line before it appear only when a tip applies. The format follows the community's own reminder posts:
 
 | Field | Rule |
 |---|---|
-| Platform | `Codeforces`, `Codechef`, `Atcoder`, `LeetCode` (spelled as in the manual posts) |
-| Timing | IST, 12-hour clock, e.g. `8:05 PM`. clist returns UTC without a `Z`; it is treated as UTC. |
-| Duration | `H:MM hours`, except whole hours which are `2 hours` |
-| Name: CodeChef | trailing rating note removed: `Starters 254 (Rated till 6 star)` → `Starters 254` |
-| Name: Codeforces sponsored | `WorldQuant Round 1 (Codeforces Round 1128, Div. 1 + Div. 2)` → `Codeforces Round 1128 (Div. 1 + Div. 2)` |
-| Name: AtCoder sponsored | `JIJ Programming Contest 2026（AtCoder Beginner Contest 476）` → `AtCoder Beginner Contest 476` (full-width or ASCII parentheses) |
-| Link: LeetCode | trailing `/` added |
+| Platform | `Codeforces`, `Codechef`, `Atcoder` or `LeetCode`. |
+| Contest name, Codeforces | Sponsored names become the round name: `WorldQuant Round 1 (Codeforces Round 1128, Div. 1 + Div. 2)` → `Codeforces Round 1128 (Div. 1 + Div. 2)`. |
+| Contest name, CodeChef | The trailing rating note is dropped: `Starters 254 (Rated till 6 star)` → `Starters 254`. |
+| Contest name, AtCoder | Sponsored names become the contest name, with ASCII or full-width parentheses: `JIJ Programming Contest 2026（AtCoder Beginner Contest 476）` → `AtCoder Beginner Contest 476`. |
+| Timing | Start time in IST on a 12-hour clock, such as `8:05 PM`. Start times without a zone are UTC. |
+| Duration | `H:MM hours`, or `H hours` for whole hours, rounded to the minute. |
+| Link | The contest link; LeetCode links end with `/`. |
 
-## Which contests are posted
+## Selection
 
-Configured in `worker/config/rules.json`:
+`worker/config/rules.json`:
 
-| Key | Meaning |
-|---|---|
-| `include` | Per platform, regexes on the contest name; a contest must match one. Defaults: Codeforces rounds and Global Rounds, CodeChef Starters, LeetCode Weekly/Biweekly, AtCoder Beginner Contests. |
-| `maxDurationHours` | Longer contests are skipped (Kotlin Heroes practice, heuristic contests, Placement Prep). |
-| `mergeCodeforcesDivs` | When a Div. 1 and a Div. 2 round start together, post one reminder with the Div. 2 link, labelled `(Div. 1 + Div. 2)`. |
-| `leadMinutes` | Reminder is due this many minutes before the start (75, matching the manual median). |
-| `minLeadMinutes` | Never send when the start is closer than this, e.g. after scheduler downtime. |
+| Key | Value | Meaning |
+|---|---|---|
+| `include` | per platform, regular expressions on the contest name | A contest is posted only if its name matches one of its platform's patterns: Codeforces rounds and Global Rounds, CodeChef Starters, LeetCode Weekly and Biweekly contests, AtCoder Beginner Contests. |
+| `maxDurationHours` | `5` | Longer events are skipped, such as Kotlin Heroes practice rounds, heuristic contests and Placement Prep weekends. |
+| `mergeCodeforcesDivs` | `true` | A Div. 1 and a Div. 2 round starting together get one reminder: the Div. 2 link, named `(Div. 1 + Div. 2)`. |
+| `leadMinutes` | `75` | A reminder becomes due 75 minutes before the start. |
+| `minLeadMinutes` | `10` | A reminder is not sent once the start is less than 10 minutes away. |
 
-Reminder identity and reschedule handling are described in [architecture.md](architecture.md#key-design-decisions) (decision 3).
+A reminder is therefore sendable from 75 to 10 minutes before the start. How reminders are identified, including after a reschedule, is in [architecture.md](architecture.md#design-decisions).
 
 ## Tips
 
-Configured in `worker/config/tips.json`. Tips are optional; most reminders have none.
+`worker/config/tips.json`:
 
-- `rules`: checked in order, first match wins. Each may constrain `platform`, `startsBeforeIST` (`"12:00"` = morning contests) and `eventMatches` (regex on the name).
-- `overrides`: contest link → tip text for a single contest. An empty string suppresses the tip for that contest.
+- `rules` are checked in order and the first match wins. A rule can require a `platform`, a start before a given IST time (`startsBeforeIST`, such as `"12:00"` for morning contests) and a contest name matching `eventMatches`. The configured rules add a discipline tip to morning LeetCode contests and a recommendation to AtCoder Beginner Contests.
+- `overrides` map a contest link to a tip for that contest alone; an empty string suppresses the tip.
 
-The scheduler also merges one-off tips from its D1 `tip_overrides` table, set with `PUT /tips` without a redeploy (see `docs/scheduler.md`).
+One-off tips set through `PUT /tips` are stored in D1 and take precedence over both ([scheduler.md](scheduler.md)).
 
 ## Tests
 
-`pnpm --filter cp-reminders-worker test` runs `worker/test/core/format.test.ts` with the rest of the Worker tests, against real clist data in `worker/test/fixtures/`:
+`worker/test/core/format.test.ts` runs with the Worker tests against frozen data in `worker/test/fixtures/`: clist responses and the community's 34 manual reminders, captured on 2026-11-07.
 
-- Golden test: the bot's output is compared with every manual reminder in `worker/test/fixtures/history.json`. 29 match byte-for-byte. The other 5 are manual mistakes the bot gets right (three contests delayed to 8:15 PM but posted with the old time, one wrong link pasted, one name typo); they are listed in the test as known manual errors.
-- Every contest that was posted manually is selected by the rules.
-- Noise is dropped (Div. 1 twin, Monday Munch, Placement Prep, Kotlin practice, heuristic contests).
-- Due-window, reschedule-key and tip-override behaviour.
-
-The fixtures are frozen golden data captured on 2026-11-07 and are not refreshed.
+- **Golden test.** For every manual reminder, the bot's text for the same contest is compared byte for byte. Five manual posts are listed in the test as known mistakes and skipped: three contests that started at 8:15 PM but were posted with 8:00 or 8:05 PM, one post carrying another round's link, and one name typo.
+- **Selection.** Every manually posted contest is selected, and noise is not: the Div. 1 twin of a merged round, Monday Munch, Placement Prep, Kotlin Heroes practice and heuristic contests.
+- **Rules.** Sponsored-name handling, the due window, the reminder key and tip overrides.
