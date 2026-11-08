@@ -4,8 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test \"test/**/*.test.ts\"",
-    "typecheck": "tsc -p tsconfig.json",
-    "fetch-fixtures": "node scripts/fetch-fixtures.mjs"
+    "typecheck": "tsc -p tsconfig.json"
   },
   "engines": {
     "node": ">=22.18"
