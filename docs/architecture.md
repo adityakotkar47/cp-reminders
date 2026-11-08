@@ -31,7 +31,7 @@ The bot posts a reminder for each selected programming contest into the Announce
 | Contests posted: every rated Codeforces round (Div. 1 to Div. 4, Educational, Global, Hello, Good Bye and sponsored rounds), CodeChef Starters, LeetCode Weekly and Biweekly, AtCoder Beginner Contests. Every such contest is reminded, not only the ones someone would remember to post. | The contests the community follows, checked against the community's 233 manual reminders from August 2025 to November 2026 ([formatter.md](formatter.md#tests)). | Unrated Codeforces rounds (testing rounds, April Fools, ICPC mirrors), Kotlin Heroes, CodeChef Monday Munch and Placement Prep, AtCoder ARC, AGC and heuristic contests, and anything longer than 5 hours get no reminder. Members see more reminders than before, for example every Sunday 8 AM LeetCode Weekly. Changing the selection is an edit to `worker/config/rules.json`. |
 | A Codeforces Div. 1 and Div. 2 pair starting together gets one reminder, named `(Div. 1 + Div. 2)`, with the Div. 2 link. | One post per contest slot, as the community posted them. | Div. 1 participants get the Div. 2 link. |
 | A reminder is due exactly 45 minutes before the start, with no rounding: an 8:00 PM contest is announced at 7:15 PM and an 8:05 PM contest at 7:20 PM. | Enough notice to join, close enough to the start to be remembered. | Posts land up to about 2 minutes after the due time: the cron fires every 5 minutes, the GitHub job takes seconds to start, and the sender waits a random 0–90 seconds so its sends are not machine-regular. |
-| A reminder that cannot be sent at least 10 minutes before the start is dropped and reported. | A reminder in the last minutes before a contest is noise. | An outage longer than the 35-minute window misses reminders. The badge turns red; a GitHub email arrives only when a send run itself fails, not when the Worker stops ticking. |
+| A reminder that cannot be sent at least 10 minutes before the start is dropped and reported. | A reminder in the last minutes before a contest is noise. | An outage longer than the 35-minute window misses reminders. The badge turns red; a GitHub email arrives only when a send run itself fails, not when the Worker stops ticking or cannot start the sender. |
 | The text copies the community's manual format exactly and is sent as plain text, never with a link preview. | Familiar posts; previews clutter the group. | None. |
 | Codeforces reminders always link to `https://codeforces.com/contests/<id>`. | That page opens before the round starts; `/contest/<id>` opens only once it has begun. | None. |
 | Tips come from pools of owner-approved lines per contest type (Div. 3, Div. 4, Educational, AtCoder Beginner Contest, morning LeetCode), one line chosen per contest from its link, plus one-off overrides; nothing is generated at send time. | The owner's voice with variety, so the same contest type does not repeat one line every time. | Contests outside those types carry no tip unless the owner adds an override. |
@@ -95,7 +95,7 @@ Schema: [`worker/migrations/0001_init.sql`](../worker/migrations/0001_init.sql).
 | `contest_snapshot` | Cache of upcoming contests | One row, replaced as a whole on each refresh. `payload` is the normalised `Contest[]` JSON. |
 | `reminders` | Outbox and audit log | One row per reminder, created when it becomes due and kept indefinitely (about 1,000 rows a year). The source of truth for "already handled". |
 | `tip_overrides` | One-off tips | Set at runtime without a redeploy; they take precedence over the overrides in `worker/config/tips.json`. |
-| `meta` | Operational facts | `last_tick_at`, `last_fetch_at`, `last_fetch_source`, `last_fetch_error`, `last_wake_at`. |
+| `meta` | Operational facts | The outcome of each tick step: `last_tick_at`; `last_fetch_at`, `last_fetch_source`, `last_fetch_error`; `last_wake_at`, `last_wake_error`. An error key is set when its step fails and removed when the step next succeeds. |
 
 A reminder's `deadline_utc` is its start minus `minLeadMinutes` (10). After the deadline it is not worth sending.
 
@@ -173,7 +173,7 @@ Bodies are JSON. Authentication is `Authorization: Bearer <token>`.
 
 | Route | Auth | Behaviour |
 |---|---|---|
-| `GET /health` | none | `{lastTickAt, lastFetchAt, lastFetchSource, lastFetchError, queued, claimed, failed24h, expired24h}`. Contains no secrets and no message text. |
+| `GET /health` | none | `{lastTickAt, lastFetchAt, lastFetchSource, lastFetchError, lastWakeError, queued, claimed, failed24h, expired24h}`. Contains no secrets and no message text. |
 | `GET /badge` | none | The health as a [shields.io endpoint badge](https://shields.io/badges/endpoint-badge) (see [Status badge](#status-badge)). |
 | `POST /tick` | `TICK_TOKEN` | Runs one tick and returns `{fetched, queued, woke, errors}`. |
 | `GET /preview` | `ADMIN_TOKEN` | The next 10 reminders with their send time in IST and rendered text. |
@@ -184,14 +184,17 @@ Bodies are JSON. Authentication is `Authorization: Bearer <token>`.
 
 ### Status badge
 
-`GET /badge` returns `{schemaVersion: 1, label: "bot", message, color}` with `Cache-Control: max-age=300`. The first matching state wins:
+`GET /badge` returns `{schemaVersion: 1, label: "bot", message, color}` with `Cache-Control: max-age=300`. The states are ordered by what to fix first, and the first matching state wins:
 
 | State | Condition | `message` | `color` |
 |---|---|---|---|
 | down | no tick in the last 15 minutes, or no tick ever | `no tick for 23m` / `never ticked` | `red` |
+| sender unreachable | `lastWakeError` is set | `dispatch failing` | `red` |
 | failing | `failed24h + expired24h > 0` | `2 missed in 24h` | `red` |
 | degraded | `lastFetchError` is set | `degraded: clist` | `yellow` |
 | healthy | otherwise | `ok · tick 3m ago` | `brightgreen` |
+
+A tick that cannot start the sender turns the badge red at once, before any reminder is missed. It stays red until a dispatch succeeds, so a fault that outlasts its reminders, such as a revoked `GH_TOKEN`, stays visible. A single transient GitHub error clears on the next tick, which retries the dispatch. The badge carries no error text; `/health` has it.
 
 The README shows it through `https://img.shields.io/endpoint?url=<WORKER_URL>/badge` [9].
 
@@ -210,7 +213,7 @@ The README shows it through `https://img.shields.io/endpoint?url=<WORKER_URL>/ba
 1. If the contest snapshot is older than 60 minutes, fetch clist: every upcoming contest of the four platforms, up to 100, which covers everything announced, usually several weeks ahead. If clist fails or returns nothing, fetch the Codeforces API instead, which needs no key: its contests replace the Codeforces ones in the snapshot, and the other platforms' upcoming contests are kept. `last_fetch_error` records the clist failure even when the fallback succeeds. If both fail, the existing snapshot stays.
 2. For every contest starting between 45 and 10 minutes from now whose key is not in the outbox yet, render the text and insert it as `queued` with `INSERT … ON CONFLICT(key) DO NOTHING`.
 3. Mark `queued` and `claimed` rows past their deadline as `expired`.
-4. If rows are waiting (`queued`, or `claimed` with an expired lease) and the last wake was more than 4 minutes ago, dispatch `send.yml` and record `last_wake_at` on a 2xx response.
+4. If rows are waiting (`queued`, or `claimed` with an expired lease) and the last wake was more than 4 minutes ago, dispatch `send.yml`. A 2xx response records `last_wake_at` and removes `last_wake_error`; any other outcome records `last_wake_error`.
 
 The two intervals do different jobs. The snapshot is refreshed hourly because contest schedules change rarely and clist asks for caching. The tick runs every 5 minutes because it decides when a reminder goes out: a reminder is queued at most 5 minutes after it becomes due, and checking the snapshot costs one query.
 
@@ -248,7 +251,7 @@ sequenceDiagram
 |---|---|---|
 | clist down or rate-limited | No fresh contest data | Codeforces fallback; contests already in the snapshot are still reminded. Shown by `/health` and a yellow badge. |
 | Cron tick late or skipped | Reminder delayed | A reminder stays sendable from 45 to 10 minutes before the start, so ticks can be up to 35 minutes late. The badge turns red after 15 minutes without a tick. |
-| Dispatch fails | Sender not woken | `last_wake_at` stays unchanged, so the next tick dispatches again. |
+| Dispatch fails (GitHub error, revoked or wrong `GH_TOKEN`) | Sender not woken; no run starts, so GitHub sends no email | `last_wake_error` turns the badge red at once and `/health` shows GitHub's error. `last_wake_at` stays unchanged, so every tick dispatches again until one succeeds. |
 | Pending run cancelled by a newer one | None | The outbox keeps the rows; the next run drains them. |
 | Two runs at once | Prevented | Concurrency group `wa-session`. One live connection is also what WhatsApp expects of a device. |
 | Sent, but the ack is lost | Risk of a duplicate | The next run finds the key in `sent.json` and acks it as sent without resending. If the deadline passes first, the row ends `expired` although the message was delivered; `sent.json` is the record of delivery. |
