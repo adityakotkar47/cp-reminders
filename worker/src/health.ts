@@ -6,10 +6,10 @@ import type { Route } from "./router.ts";
 const DAY_MS = 24 * 3600_000;
 
 interface Counts {
-  queued: number;
-  claimed: number;
-  failed24h: number;
-  expired24h: number;
+  queued: number | null;
+  claimed: number | null;
+  failed24h: number | null;
+  expired24h: number | null;
 }
 
 export const healthRoute: Route = {
@@ -21,10 +21,10 @@ export const healthRoute: Route = {
       env.DB
         .prepare(
           "SELECT " +
-            "COALESCE(SUM(status = 'queued'), 0) AS queued, " +
-            "COALESCE(SUM(status = 'claimed'), 0) AS claimed, " +
-            "COALESCE(SUM(status = 'failed' AND updated_at >= ?1), 0) AS failed24h, " +
-            "COALESCE(SUM(status = 'expired' AND updated_at >= ?1), 0) AS expired24h " +
+            "SUM(status = 'queued') AS queued, " +
+            "SUM(status = 'claimed') AS claimed, " +
+            "SUM(status = 'failed' AND updated_at >= ?1) AS failed24h, " +
+            "SUM(status = 'expired' AND updated_at >= ?1) AS expired24h " +
             "FROM reminders",
         )
         .bind(since)
