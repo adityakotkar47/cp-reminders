@@ -4,7 +4,7 @@ import upcoming from "./fixtures/clist-upcoming.json" with { type: "json" };
 import type { Fetcher } from "../src/env.ts";
 
 export const MIN = 60_000;
-export const NOW = Date.parse("2026-11-11T13:20:00Z");
+export const NOW = Date.parse("2026-11-11T13:45:00Z");
 export const STARTERS_264_KEY = "2|https://www.codechef.com/START264|2026-11-11T14:30:00.000Z";
 
 export const fixtureContests = upcoming.objects as unknown as Contest[];

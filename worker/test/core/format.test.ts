@@ -77,13 +77,13 @@ test("sponsored AtCoder names are normalised (full-width and ASCII parens)", () 
   }
 });
 
-test("due window: fires from start-75m, not when start is <10m away", () => {
+test("due window: fires from start-45m, not when start is <10m away", () => {
   const c = upcoming.find((x) => x.event === "Starters 264")!;
   const start = Date.parse(c.start + "Z");
   const at = (minBefore: number) => start - minBefore * 60_000;
-  expect(dueReminders([c], rules, at(76))).toHaveLength(0);
-  expect(dueReminders([c], rules, at(75))).toHaveLength(1);
-  expect(dueReminders([c], rules, at(40))).toHaveLength(1);
+  expect(dueReminders([c], rules, at(46))).toHaveLength(0);
+  expect(dueReminders([c], rules, at(45))).toHaveLength(1);
+  expect(dueReminders([c], rules, at(20))).toHaveLength(1);
   expect(dueReminders([c], rules, at(5))).toHaveLength(0);
 });
 

@@ -62,7 +62,7 @@ it("a reminder whose sender never acks ends failed after three attempts", async 
     };
     expect(res.items).toHaveLength(1);
   }
-  vi.setSystemTime(NOW + 44 * MIN);
+  vi.setSystemTime(NOW + 33 * MIN);
   const none = (await (await api("POST", "/outbox/claim", env.SENDER_TOKEN, { claimId: "run-4" })).json()) as {
     items: unknown[];
   };

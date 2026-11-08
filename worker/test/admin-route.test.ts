@@ -92,7 +92,7 @@ describe("GET /preview", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toMatch(/text\/plain/);
     const body = await res.text();
-    expect(body).toContain("#1  sends Wed 11 Nov 2026, 6:45 PM IST");
+    expect(body).toContain("#1  sends Wed 11 Nov 2026, 7:15 PM IST");
     expect(body).toContain("Contest Name: Starters 264");
     expect(body.match(/^#\d+ /gm)!.length).toBeLessThanOrEqual(10);
   });

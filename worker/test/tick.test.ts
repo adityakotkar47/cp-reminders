@@ -82,7 +82,7 @@ describe("runTick: queueing", () => {
     const moved = fixtureContests.map((c) => (c.href.endsWith("START264") ? { ...c, start: "2026-11-11T14:45:00" } : c));
     await seedReminder({ key: STARTERS_264_KEY, status: "sent", attempts: 1 });
     const { fetcher } = mockFetch({ clist: () => jsonResponse({ objects: moved }) });
-    expect((await runTick(env, NOW + 10 * MIN, fetcher)).queued).toBe(1);
+    expect((await runTick(env, NOW + 15 * MIN, fetcher)).queued).toBe(1);
     expect(await count()).toBe(2);
     expect(await getReminder("2|https://www.codechef.com/START264|2026-11-11T14:45:00.000Z")).toMatchObject({
       status: "queued",

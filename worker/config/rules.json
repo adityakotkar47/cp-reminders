@@ -16,6 +16,6 @@
   },
   "maxDurationHours": 5,
   "mergeCodeforcesDivs": true,
-  "leadMinutes": 75,
+  "leadMinutes": 45,
   "minLeadMinutes": 10
 }

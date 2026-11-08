@@ -31,15 +31,15 @@ describe("ensureSnapshot: clist", () => {
     expect(result.contests).toHaveLength(fixtureContests.length);
     expect(calls.clist).toHaveLength(1);
     expect(calls.clist[0]!.url).toBe(
-      "https://clist.by/api/v4/contest/?resource_id__in=1,2,93,102&start__gt=2026-11-11T13:20:00&order_by=start&limit=100",
+      "https://clist.by/api/v4/contest/?resource_id__in=1,2,93,102&start__gt=2026-11-11T13:45:00&order_by=start&limit=100",
     );
     expect(calls.clist[0]!.init?.headers).toEqual({ Authorization: "ApiKey user:key" });
 
     const row = await snapshotRow();
     expect(row?.source).toBe("clist");
-    expect(row?.fetched_at).toBe("2026-11-11T13:20:00.000Z");
+    expect(row?.fetched_at).toBe("2026-11-11T13:45:00.000Z");
     expect(Object.keys(JSON.parse(row!.payload)[0]).sort()).toEqual(["duration", "event", "href", "resource_id", "start"]);
-    expect(await getMeta(env.DB, "last_fetch_at")).toBe("2026-11-11T13:20:00.000Z");
+    expect(await getMeta(env.DB, "last_fetch_at")).toBe("2026-11-11T13:45:00.000Z");
     expect(await getMeta(env.DB, "last_fetch_source")).toBe("clist");
     expect(await getMeta(env.DB, "last_fetch_error")).toBeNull();
   });
