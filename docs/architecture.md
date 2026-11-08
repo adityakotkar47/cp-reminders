@@ -197,7 +197,7 @@ Bodies are JSON. Authentication is `Authorization: Bearer <token>`.
 
 A tick that cannot start the sender turns the badge red at once, before any reminder is missed. It stays red until a dispatch succeeds, so a fault that outlasts its reminders stays visible. A single transient GitHub error clears on the next tick, which retries the dispatch. The badge carries no error text; `/health` has it.
 
-The README shows it through `https://img.shields.io/endpoint?url=<WORKER_URL>/badge` [9].
+The README shows it through `https://img.shields.io/endpoint?url=<WORKER_URL>/badge&logo=cloudflare&logoColor=white` [9].
 
 ### Workflow dispatch
 
