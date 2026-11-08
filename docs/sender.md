@@ -1,148 +1,114 @@
 # Sender
 
-The sender (`sender/`, Go) is the only component that talks to WhatsApp. It claims queued reminders from the Worker's outbox, posts each one to the community's Announcements group, records what it delivered, and acks the results. It runs as a short GitHub Actions job. If that stops being viable, the same outbox API could serve an always-on host ([Fallback deployment](architecture.md#fallback-deployment)), but the sender has no daemon mode. It never decides what to send or when, and it never accepts a destination from the network.
-
-It is an unofficial linked device built on [whatsmeow](https://pkg.go.dev/go.mau.fi/whatsmeow).
+The sender (`sender/`, Go) is the only component that talks to WhatsApp. It claims queued reminders from the Worker's outbox, posts each one to the community's Announcements group, records what it delivered and acknowledges the results. It is an unofficial linked device built on [whatsmeow](https://pkg.go.dev/go.mau.fi/whatsmeow) and runs as a short GitHub Actions job ([workflow.md](workflow.md#sendyml-drain-the-outbox)). It never decides what to send or when, and never takes a destination from the network.
 
 ## Commands
 
-All commands are run from the repository root as `go -C sender run ./cmd/wa <command>`. A relative `--state` is resolved from `sender/`. You can also build once with `go -C sender build -o ../wa ./cmd/wa` and run `./wa <command>`. Every command accepts `-h`.
+Run from the repository root as `go -C sender run ./cmd/wa <command>`; a relative `--state` resolves from `sender/`. Every command accepts `-h`.
 
-| Command | What it does | Touches WhatsApp |
+| Command | Behaviour | Connects to WhatsApp |
 |---|---|---|
 | `wa keygen` | Prints a new age identity (`AGE-SECRET-KEY-1…`) and its public key. | No |
-| `wa pair --state DIR [--phone 91XXXXXXXXXX] [--force]` | Links a fresh device. It shows a QR code, or with `--phone` prints an 8-character pairing code. It waits for the first login, stays connected for 10 s, disconnects, and writes `DIR/session.db.age`. It refuses to overwrite an existing session unless you pass `--force`. | Yes |
-| `wa groups --state DIR` | Connects, lists joined groups (JID, name, community parent, default sub-group, linked parent, announce-only, our admin status), and prints an `ANNOUNCEMENTS CANDIDATE:` line for every default sub-group. Then it saves the session. | Yes |
-| `wa drain --state DIR [--jitter 90s] [--dry-run]` | Runs one claim, deliver and ack cycle (see [Drain](#drain)). | Only if something is pending |
+| `wa pair --state DIR [--phone 91XXXXXXXXXX] [--force]` | Links a new device, by QR code or, with `--phone`, by an 8-character pairing code. Waits for the first login, stays connected 10 s, disconnects and writes `DIR/session.db.age`. Refuses to replace an existing session without `--force`. | Yes |
+| `wa groups --state DIR` | Lists joined groups with their community flags and our admin status, marks every community Announcements group with an `ANNOUNCEMENTS CANDIDATE:` line, and saves the session. | Yes |
+| `wa drain --state DIR [--jitter 90s] [--dry-run]` | One claim, deliver and acknowledge cycle ([Drain](#drain)). | Only when something is pending |
 
-Common flags are `--log-level` (whatsmeow log level, default `WARN`) and `--connect-timeout` (60 s). `drain` and `groups` also take `--timeout` for the whole run (4 min and 90 s). `pair` always allows 5 min.
+Shared flags: `--log-level` (whatsmeow log level, `WARN` by default) and `--connect-timeout` (60 s). `drain` and `groups` take `--timeout` for the whole run (4 minutes and 90 seconds); `pair` allows 5 minutes.
 
-Exit codes are `0` for success (including an empty outbox), `1` for any failure, and `2` for a usage error.
+Exit codes: `0` on success, including an empty outbox; `1` on any failure; `2` on a usage error.
 
 ## Environment
 
-| Variable | Used by | Meaning |
+| Variable | Commands | Meaning |
 |---|---|---|
-| `AGE_IDENTITY` | pair, groups, drain | age X25519 identity that encrypts and decrypts `session.db.age`. Surrounding whitespace is ignored. It is never printed, and parse errors do not echo it. |
-| `ANNOUNCE_JID` | drain | The only chat the sender may post to, e.g. `120363…@g.us`. It must be a group JID. Get it from `wa groups`. |
-| `WORKER_URL` | drain | Outbox base URL. The sender calls `POST {WORKER_URL}/outbox/claim` and `/outbox/ack`. |
+| `AGE_IDENTITY` | pair, groups, drain | The age X25519 identity that encrypts and decrypts `session.db.age`. Surrounding whitespace is ignored; the value is never printed, including in parse errors. |
+| `ANNOUNCE_JID` | drain | The only chat the sender may post to: a group JID such as `120363…@g.us`, found with `wa groups`. |
+| `WORKER_URL` | drain | Base URL of the Worker; the sender calls `/outbox/claim` and `/outbox/ack`. |
 | `SENDER_TOKEN` | drain | Bearer token for `/outbox/*`. |
-| `GITHUB_STEP_SUMMARY` | drain | Set by GitHub Actions. On failure the sender appends a Markdown section to this file listing every unsent reminder's text in a fenced block, ready to paste. |
+| `GITHUB_STEP_SUMMARY` | drain | Set by GitHub Actions. On failure the sender appends every unsent reminder's text to it, in a fenced block ready to paste. |
 
 ## State directory
 
 | File | Content |
 |---|---|
-| `session.db.age` | The whatsmeow SQLite store, age-encrypted to `AGE_IDENTITY`'s own recipient. It is replaced atomically on every save. |
-| `sent.json` | A JSON array of the last 500 `{key, sentAt, messageId}` this sender delivered. It is written after every single send. |
+| `session.db.age` | The whatsmeow SQLite store, encrypted to the public key of `AGE_IDENTITY`, so one secret both reads and writes it. Replaced atomically on every save. |
+| `sent.json` | The last 500 delivered reminders as `{key, sentAt, messageId}`, written after every send. |
 
-The plaintext database exists only in a private temporary directory (`cp-reminders-wa-*` under the OS temp dir) while a command runs. It is deleted on exit, including after errors and Ctrl-C. The repository's `.gitignore` ignores `session.db*` and `/state/`.
-
-Signal keys rotate on every connection. Once the session has been opened, every exit path that disconnected re-encrypts it, so a committed `session.db.age` is always the latest. The one exception is `pair`: when pairing itself fails, nothing is written.
+While a command runs, the decrypted database lives in a private temporary directory (`cp-reminders-wa-*`), which is removed on every exit path. Signal keys rotate on every connection, so once a session has been opened, every exit that disconnects re-encrypts it; only a failed pairing writes nothing.
 
 ## Drain
 
-1. Validate the configuration (`ANNOUNCE_JID` shape, `AGE_IDENTITY`, `sent.json` readable) before any network call.
-2. `POST /outbox/claim {claimId}` with a random `claimId`. The claim is never retried, because a retried claim would strand the rows returned by a lost first response until their lease expired.
-3. If there are no items, print `outbox empty` and exit 0 without decrypting the session or connecting.
-4. Validate items. A claim may hold at most 5 items, otherwise all of them are refused. A key must be non-empty and unique. Text must be non-empty and at most 1000 characters. Invalid items are acked `failed` and never sent.
-5. Items whose key is already in `sent.json` are acked `sent` with the stored `messageId`, without resending. If nothing else is pending, WhatsApp is not contacted at all.
-6. Sleep a random 0..`--jitter`, decrypt the session, connect, and wait for login (60 s).
-7. Check the target with `GetGroupInfo(ANNOUNCE_JID)`. It must be a community default sub-group (`IsDefaultSubGroup`), and we must be admin or super-admin, matched by phone-number JID or LID.
-8. Send each pending item as a plain text message (`waE2E.Message{Conversation: …}`), never with a link preview, and append it to `sent.json` immediately. On the first send error, or a `sent.json` write error, sending stops and the remaining items are reported as `failed` ("not attempted").
-9. Disconnect and re-encrypt the session. This runs before the ack, so the rotated keys are saved even if the ack hangs.
-10. `POST /outbox/ack {claimId, results}` with up to 3 attempts, 1 s then 2 s backoff, retrying only network errors, 5xx and 429. The ack has its own 60 s budget, so it still runs when the main timeout has already expired.
+1. Check the configuration before any network call: the shape of `ANNOUNCE_JID`, a valid `AGE_IDENTITY` and a readable `sent.json`.
+2. `POST /outbox/claim {claimId}` with a random `claimId`. A claim is never retried: a retry after a lost response would leave the first claim's rows waiting for their lease to expire.
+3. With no items, print `outbox empty` and exit without decrypting the session or connecting.
+4. Validate the items. A claim of more than 5 items is refused as a whole; each key must be non-empty and unique; each text must be non-empty and at most 1,000 characters. Invalid items are acknowledged as `failed` and never sent.
+5. Items whose key is already in `sent.json` are acknowledged as `sent` with the stored message ID and not sent again. If nothing else is pending, WhatsApp is not contacted.
+6. Wait a random time between 0 and `--jitter`, decrypt the session, connect and wait for login.
+7. Check the target with `GetGroupInfo(ANNOUNCE_JID)`: it must be a community's default subgroup (`IsDefaultSubGroup`), and the sender must be admin or super admin, matched by phone-number JID or LID.
+8. Send each pending item as a plain text message (`waE2E.Message{Conversation: …}`), which carries no link preview, and record it in `sent.json` straight away. The first send error or `sent.json` write error stops sending; the remaining items are reported as `failed` ("not attempted").
+9. Disconnect and encrypt the session, so the rotated keys are saved even if the acknowledgement hangs.
+10. `POST /outbox/ack {claimId, results}`, retrying network errors, 5xx and 429 up to 3 attempts with 1 s and 2 s backoff, within its own 60-second budget.
 
-Any failure exits 1 and writes the step summary. This covers a connect failure, logged out, stream replaced, a temporary ban, a refused target, a send error, an ack failure, or a session save failure. When the claim succeeded, unsent items are still acked `failed`, so the Worker can retry them (`attempts < 3`) instead of waiting for the lease to expire.
+Any failure (connect, logged out, stream replaced, temporary ban, refused target, send, acknowledgement or session save) exits with code 1 and writes the job summary. Unsent items from a successful claim are acknowledged as `failed`, so the Worker queues them again while attempts remain.
 
-`--dry-run` claims, connects, verifies the target and prints the texts. It does not send, does not write `sent.json`, and does not ack. The claimed rows return to the queue when their 10-minute lease expires, because the API has no "release" call.
+`--dry-run` claims, connects, checks the target and prints the texts; it does not send, write `sent.json` or acknowledge, so the claimed rows return to the queue when their 10-minute lease expires.
 
-Message text appears only in the `--dry-run` output and in the failure step summary. It is never in the normal log.
+Message text appears only in `--dry-run` output and in the failure summary, never in the normal log.
 
-The workflow that runs `wa drain` is described in [workflow.md](workflow.md#sendyml-wake-and-drain).
+## Pairing
 
-## Pairing procedure
+The paired number must be an admin of the community so that it can post in Announcements, and its phone must open WhatsApp at least every 14 days: linked devices are logged out after 14 days without the phone being used ([WhatsApp FAQ](https://faq.whatsapp.com/378279804439436/)).
 
-Use a spare number that is a **community admin**, so that it can post in Announcements. The phone must open WhatsApp at least every 14 days. A linked device that has not connected for 30 days is dropped ([WhatsApp FAQ](https://faq.whatsapp.com/378279804439436/)), so daily runs are well within that limit.
-
-1. Generate the key once and store it. Save the `AGE-SECRET-KEY-1…` line as the GitHub secret `AGE_IDENTITY` and in your password manager. Never commit it.
-   ```sh
-   go -C sender run ./cmd/wa keygen
-   ```
-2. Load it into your shell without writing it to history:
+1. Create the key once with `go -C sender run ./cmd/wa keygen`. Store the `AGE-SECRET-KEY-1…` line as the GitHub secret `AGE_IDENTITY` and in a password manager; never commit it.
+2. Put it in the shell without writing it to history:
    - bash: `read -rs AGE_IDENTITY && export AGE_IDENTITY`
    - PowerShell 7: `$env:AGE_IDENTITY = Read-Host -MaskInput AGE_IDENTITY`
-3. Create an empty `state` worktree next to the repo, so the session never lands in `main`:
-   ```sh
-   git worktree add --orphan -b state ../cp-reminders-state
-   ```
-4. Pair, using one of these two methods:
-   - **QR:**
-     ```sh
-     go -C sender run ./cmd/wa pair --state ../../cp-reminders-state
-     ```
-     Then on the phone, go to WhatsApp > Linked devices > Link a device and scan the code. Codes rotate, and the window closes after about 160 s.
-   - **Pairing code**, when you can't scan (e.g. over SSH):
-     ```sh
-     go -C sender run ./cmd/wa pair --state ../../cp-reminders-state --phone 91XXXXXXXXXX
-     ```
-     The number is in international format without `+`. On the phone, go to Linked devices > Link a device > Link with phone number instead, and enter the printed code.
+3. Check out branch `state` in a separate worktree so the session never lands on `main`: `git worktree add ../cp-reminders-state state`, or `git worktree add --orphan -b state ../cp-reminders-state` when the branch does not exist.
+4. Pair, by QR code or by pairing code:
+   - `go -C sender run ./cmd/wa pair --state ../../cp-reminders-state`, then on the phone: Linked devices → Link a device, and scan. Codes rotate; the window closes after about 160 seconds.
+   - `go -C sender run ./cmd/wa pair --state ../../cp-reminders-state --phone 91XXXXXXXXXX` (international format without `+`), then on the phone: Linked devices → Link a device → Link with phone number instead, and enter the printed code.
 
-   The device appears on the phone as `cp-reminders`. Wait for `session saved to …`.
-5. Find the Announcements JID:
-   ```sh
-   go -C sender run ./cmd/wa groups --state ../../cp-reminders-state
-   ```
-   Save it as the secret `ANNOUNCE_JID` ([see below](#finding-the-announcements-jid)).
-6. Commit and push the state:
-   ```sh
-   git -C ../cp-reminders-state add session.db.age
-   git -C ../cp-reminders-state commit -m "chore(state): initial session"
-   git -C ../cp-reminders-state push -u origin state
-   ```
-   Then remove the worktree with `git worktree remove ../cp-reminders-state`. Do not keep a second copy of the session in use. Two clients with the same keys cause `StreamReplaced`, and stale keys break decryption.
+   Add `--force` when the worktree already holds a session, and remove the previous device from the phone's linked devices first. Wait for `session saved to …`.
+5. Find the Announcements JID with `go -C sender run ./cmd/wa groups --state ../../cp-reminders-state` ([below](#announcements-jid)) and store it as the GitHub secret `ANNOUNCE_JID`.
+6. Commit `session.db.age` on branch `state`, push it, and remove the worktree with `git worktree remove ../cp-reminders-state`. Only the workflow may use the session from then on: two clients with the same keys end in `StreamReplaced`.
 
-To re-pair after a logout, repeat steps 3–6 with `--force`, starting from the current `state` branch, then push. Remove the old "cp-reminders" entry from the phone's linked devices first.
+## Announcements JID
 
-## Finding the Announcements JID
-
-A community has a parent group (`PARENT=yes`) that nobody can post into, and a built-in Announcements group. The Announcements group is a separate `@g.us` group with `DEFAULT_SUB=yes`, its `LINKED_PARENT` set to the community, and usually `ANNOUNCE=yes` (admins only). Its name usually matches the community name. `wa groups` marks it like this:
+A community has a parent group (`PARENT=yes`) that nobody posts into, and an Announcements group: a separate `@g.us` group with `DEFAULT_SUB=yes`, `LINKED_PARENT` set to the community and, normally, `ANNOUNCE=yes` (admins only). `wa groups` marks it:
 
 ```
 ANNOUNCEMENTS CANDIDATE: 120363xxxxxxxxxxxx@g.us name="CP Community" community=120363yyyyyyyyyyyy@g.us admin=yes
 ```
 
-Use that JID, and check that `admin=yes`. If the bot is in several communities you will see several candidates, so pick the one whose `community` matches. `wa drain` re-checks both properties before every send.
+Use the candidate whose `community` is the right community and whose line shows `admin=yes`. `wa drain` checks both properties again before every send.
 
 ## Troubleshooting
 
-| Symptom | Cause | Fix |
+| Message | Cause | Fix |
 |---|---|---|
-| `no session in state directory; run wa pair first` | `state` branch empty or not checked out into `--state`. | Check the checkout path, or pair. |
-| `AGE_IDENTITY: invalid age X25519 identity`, or `unseal …: no identity matched` | Wrong or truncated secret, or the session was encrypted with another key. | Fix the secret, or re-pair with the current key. |
-| `whatsapp: logged out (reason: …)` | Removed from the phone's linked devices, the phone was unused for more than 14 days, or WhatsApp revoked the session. | Re-pair with `--force`. Claimed rows are acked failed and retried until their deadline. |
-| `session is not paired` | The store exists but holds no device. whatsmeow deletes the device on `device_removed`. | Re-pair. |
-| `whatsapp: stream replaced …` | Another process connected with the same session, e.g. a local `wa groups` during a run, or a second copy of the state. | Make sure only the workflow uses the session. Re-pair if it persists. |
-| `whatsapp: temporarily banned: …` | Account restriction. | Stop sending, use the phone normally, and wait out the stated expiry. |
-| `whatsapp: client outdated` | WhatsApp rejected this whatsmeow version. | `go -C sender get go.mau.fi/whatsmeow@latest && go -C sender mod tidy`, then test and redeploy. |
-| `whatsapp: timed out waiting for connection` | Network issue, or a slow initial sync. | Re-run. If it happens often, raise `--connect-timeout`. |
-| `target is not a community announcements group` | `ANNOUNCE_JID` points at a normal group or the community parent. | Use the `ANNOUNCEMENTS CANDIDATE` JID. |
-| `sender is not an admin of the target group` | The spare number lost admin. | Make it a community admin again from the main number. |
-| `passkey pairing is not supported` | The phone asked for passkey linking. | Use the other method (`--phone` or QR). |
-| Step summary says "delivered but not acknowledged" | The message was posted, but `/outbox/ack` failed. | Nothing to post. The next claim of those rows is acked `sent` from `sent.json`. If the deadline passes first, the Worker marks the rows `expired` even though they were delivered. |
-| `outbox claim: HTTP 401` | `SENDER_TOKEN` differs between the Worker and GitHub. | Set the same value in both places. |
+| `no session in state directory; run wa pair first` | Branch `state` is empty or not checked out at `--state`. | Check the path, or pair. |
+| `AGE_IDENTITY: invalid age X25519 identity`, `unseal …: no identity matched` | Wrong or truncated secret, or a session encrypted with another key. | Fix the secret, or pair again with the current key. |
+| `whatsapp: logged out (reason: …)` | The device was removed on the phone, the phone went unused for 14 days, or WhatsApp revoked the session. | Pair again with `--force`. Claimed rows are acknowledged as failed and retried until their deadline. |
+| `session is not paired` | The store holds no device; whatsmeow deletes it on `device_removed`. | Pair again. |
+| `whatsapp: stream replaced …` | Another process used the same session, such as a local `wa groups` during a run. | Make sure only the workflow uses the session. |
+| `whatsapp: temporarily banned: …` | Account restriction. | Stop sending, use the phone normally, and wait for the stated expiry. |
+| `whatsapp: client outdated` | WhatsApp rejects this whatsmeow version. | `go -C sender get go.mau.fi/whatsmeow@latest && go -C sender mod tidy`, then test and push. |
+| `whatsapp: timed out waiting for connection` | Network problem or a slow initial sync. | Run again; raise `--connect-timeout` if it recurs. |
+| `target is not a community announcements group` | `ANNOUNCE_JID` is a normal group or the community parent. | Use the `ANNOUNCEMENTS CANDIDATE` JID. |
+| `sender is not an admin of the target group` | The number is not a community admin. | Make it an admin from the owner's number. |
+| `passkey pairing is not supported` | The phone asked for passkey linking. | Use the other pairing method. |
+| Summary says "delivered but not acknowledged" | The message was posted but `/outbox/ack` failed. | Nothing to post; the next run acknowledges it from `sent.json`. |
+| `outbox claim: HTTP 401` | `SENDER_TOKEN` differs between the Worker and GitHub. | Set the same value in both. |
 
-## Code layout
+## Code
 
 | Package | Responsibility |
 |---|---|
-| `cmd/wa` | Flags, environment, wiring, groups table, pairing UI. |
-| `internal/drain` | The claim, validate, deliver and ack orchestration, plus the step summary. It depends only on small `Outbox`, `Session` and `Ledger` interfaces, so it is unit-tested with fakes. |
-| `internal/outbox` | Typed HTTP client for `/outbox/claim` and `/outbox/ack`, with per-request timeouts and ack retries. |
-| `internal/state` | age vault, encrypted session store, and the `sent.json` ledger. |
-| `internal/wa` | whatsmeow wrapper: fatal-event watcher, connect-and-wait, text send, QR and phone pairing, admin check. |
-
-Run the checks from the repository root:
+| `cmd/wa` | Flags, environment, wiring, the groups table and the pairing prompts. |
+| `internal/drain` | Claim, validate, deliver and acknowledge, and the failure summary. Depends only on the `Outbox`, `Session` and `Ledger` interfaces, so it is tested with fakes. |
+| `internal/outbox` | HTTP client for `/outbox/claim` and `/outbox/ack` with per-request timeouts and acknowledgement retries. |
+| `internal/state` | The age vault, the encrypted session store and the `sent.json` ledger. |
+| `internal/wa` | whatsmeow wrapper: fatal-event watcher, connect and wait, plain text sending, QR and phone pairing, admin check. |
 
 ```sh
 go -C sender vet ./...
@@ -150,11 +116,11 @@ go -C sender test ./...
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go -C sender build ./cmd/wa
 ```
 
-## Sources behind the implementation choices
+## Library behaviour the code depends on
 
-- **whatsmeow store on pure-Go SQLite.** `sqlstore.NewWithDB(db, "sqlite3", log)` takes the dialect separately from the `database/sql` driver. The dialect parser accepts any name starting with `sqlite` (`go.mau.fi/util/dbutil.ParseDialect`). `Container.Upgrade` fails with "foreign keys are not enabled" unless `PRAGMA foreign_keys` is on, and the docs say "it's strongly recommended to enable foreign keys" ([store/sqlstore/container.go](https://pkg.go.dev/go.mau.fi/whatsmeow/store/sqlstore#New)). This lets the sender use [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite), which registers driver `"sqlite"` and runs each `_pragma=` DSN value on every new connection (`driver.go`). The DSN is `…/session.db?_pragma=foreign_keys(1)&_pragma=busy_timeout(10000)&_pragma=journal_mode(DELETE)`. The result builds with `CGO_ENABLED=0`. `DELETE` journal mode leaves no `-wal`/`-shm` side files, so the single closed `.db` file is the whole state.
-- **Group fields.** `types.GroupInfo` embeds `GroupName{Name}`, `GroupParent{IsParent}`, `GroupLinkedParent{LinkedParentJID}`, `GroupIsDefaultSub{IsDefaultSubGroup}` and `GroupAnnounce{IsAnnounce}`. `Participants []GroupParticipant` carries `JID`, `PhoneNumber`, `LID`, `IsAdmin` and `IsSuperAdmin` ([types/group.go](https://pkg.go.dev/go.mau.fi/whatsmeow/types#GroupInfo)). In LID-addressed groups the participant `JID` is a LID, so admin checks compare against both `Store.ID` and `Store.LID`. `GetJoinedGroups(ctx)` and `GetGroupInfo(ctx, jid)` take a context.
-- **Pairing.** `GetQRChannel` must be called before `Connect`, and emits `code`, `success`, `timeout`, `error` and passkey items ([qrchan.go](https://pkg.go.dev/go.mau.fi/whatsmeow#Client.GetQRChannel)). `PairPhone(ctx, phone, showPushNotification, clientType, clientDisplayName)` must be called after connecting and after the first QR event. The display name "must be formatted as `Browser (OS)`", and the server validates it, so the sender uses `Chrome (Linux)`. Codes expire with the QR window, about 160 s ([pair-code.go](https://pkg.go.dev/go.mau.fi/whatsmeow#Client.PairPhone)). `PairSuccess` "is generally followed by a websocket reconnection, so you should wait for the Connected before trying to send anything" (types/events). Passkey pairing (`PairPasskeyRequest`) needs a WebAuthn response, which a CLI cannot give, so it is rejected.
-- **Fatal events.** `LoggedOut` ("the client has been unpaired from the phone"), `StreamReplaced` ("another client connecting with the same keys"), `TemporaryBan`, `ConnectFailure`, `ClientOutdated`, `StreamError` and `PairError` all end the run with a distinct error ([types/events](https://pkg.go.dev/go.mau.fi/whatsmeow/types/events)). On `device_removed`, whatsmeow deletes the device from the store itself, which is why the next run reports "not paired". `Disconnect()` waits up to 5 s for the event-handler queue before returning, so store writes caused by the last events finish before the database is closed and encrypted.
-- **Sending.** `SendMessage(ctx, to, *waE2E.Message, …)` returns a `SendResponse` whose `ID` is the message id stored in `sent.json` and the ack ([send.go](https://pkg.go.dev/go.mau.fi/whatsmeow#Client.SendMessage)).
-- **Encryption.** [filippo.io/age](https://pkg.go.dev/filippo.io/age): `GenerateX25519Identity`, `ParseX25519Identity`, and `Encrypt(dst, recipient)`, whose writer "must" be closed "for the last chunk to be encrypted and flushed". The file is encrypted to the identity's own recipient, so a single secret both reads and writes the state. Writes go to a temp file in the same directory and are then renamed, so a crash never leaves a truncated `session.db.age`.
+- **Pure-Go SQLite store.** `sqlstore.NewWithDB(db, "sqlite3", log)` takes the SQL dialect separately from the `database/sql` driver, and `Container.Upgrade` requires `PRAGMA foreign_keys` ([sqlstore](https://pkg.go.dev/go.mau.fi/whatsmeow/store/sqlstore#New)). [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) registers driver `sqlite` and applies `_pragma=` DSN values to every connection, so the DSN is `session.db?_pragma=foreign_keys(1)&_pragma=busy_timeout(10000)&_pragma=journal_mode(DELETE)` and the binary builds with `CGO_ENABLED=0`. `DELETE` journaling leaves no `-wal` or `-shm` files, so the closed database is a single file.
+- **Group fields.** `types.GroupInfo` exposes `Name`, `IsParent`, `LinkedParentJID`, `IsDefaultSubGroup` and `IsAnnounce`; participants carry `JID`, `PhoneNumber`, `LID`, `IsAdmin` and `IsSuperAdmin` ([types](https://pkg.go.dev/go.mau.fi/whatsmeow/types#GroupInfo)). In LID-addressed groups a participant's `JID` is a LID, so the admin check compares against both the device's phone JID and its LID.
+- **Pairing.** `GetQRChannel` is called before `Connect` and emits code, success, timeout, error and passkey items ([GetQRChannel](https://pkg.go.dev/go.mau.fi/whatsmeow#Client.GetQRChannel)). `PairPhone` is called after the first QR event; its display name must have the form `Browser (OS)` and is `Chrome (Linux)` ([PairPhone](https://pkg.go.dev/go.mau.fi/whatsmeow#Client.PairPhone)). A successful pairing is followed by a reconnection, so `pair` waits for `Connected`. Passkey pairing needs a WebAuthn response, which a command line cannot give.
+- **Fatal events.** `LoggedOut`, `StreamReplaced`, `TemporaryBan`, `ConnectFailure`, `ClientOutdated`, `StreamError` and `PairError` each end the run with a distinct error ([events](https://pkg.go.dev/go.mau.fi/whatsmeow/types/events)). `Disconnect()` waits for the event handlers, so store writes from the last events complete before the database is encrypted.
+- **Sending.** `SendMessage` returns a `SendResponse` whose `ID` is the message ID stored in `sent.json` and sent in the acknowledgement ([SendMessage](https://pkg.go.dev/go.mau.fi/whatsmeow#Client.SendMessage)).
+- **Encryption.** [filippo.io/age](https://pkg.go.dev/filippo.io/age): the `Encrypt` writer must be closed to flush the last chunk. Encrypted files are written to a temporary file in the same directory and renamed, so a crash never leaves a truncated `session.db.age`.
