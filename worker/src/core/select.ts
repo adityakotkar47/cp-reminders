@@ -44,18 +44,9 @@ export function selectContests(list: readonly Contest[], rules: Rules): Contest[
 export const reminderKey = (c: Contest): string =>
   `${c.resource_id}|${c.href}|${new Date(utcMs(c.start)).toISOString()}`;
 
-export function dueReminders(
-  list: readonly Contest[],
-  rules: Rules,
-  nowMs: number,
-  sent: ReadonlySet<string> = new Set(),
-): Contest[] {
+export function dueReminders(list: readonly Contest[], rules: Rules, nowMs: number): Contest[] {
   return selectContests(list, rules).filter((c) => {
     const start = utcMs(c.start);
-    return (
-      nowMs >= start - rules.leadMinutes * 60_000 &&
-      nowMs <= start - rules.minLeadMinutes * 60_000 &&
-      !sent.has(reminderKey(c))
-    );
+    return nowMs >= start - rules.leadMinutes * 60_000 && nowMs <= start - rules.minLeadMinutes * 60_000;
   });
 }
