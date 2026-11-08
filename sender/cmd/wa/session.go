@@ -19,7 +19,10 @@ type conn struct {
 	cli  *wa.Client
 }
 
-var _ drain.Session = (*conn)(nil)
+var (
+	_ drain.Session = (*conn)(nil)
+	_ releaser      = (*conn)(nil)
+)
 
 func dial(ctx context.Context, dir string, v *state.Vault, log waLog.Logger, connectTimeout time.Duration) (*conn, error) {
 	sess, err := state.OpenSession(ctx, dir, v, log.Sub("Store"))
@@ -39,7 +42,11 @@ func dial(ctx context.Context, dir string, v *state.Vault, log waLog.Logger, con
 
 func (c *conn) Close() error {
 	c.cli.Disconnect()
-	return c.sess.Commit()
+	return c.sess.Save()
+}
+
+func (c *conn) Release() error {
+	return c.sess.Release()
 }
 
 func (c *conn) Group(ctx context.Context, jid string) (drain.Group, error) {

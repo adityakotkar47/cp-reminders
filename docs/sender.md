@@ -46,14 +46,32 @@ While a command runs, the decrypted database lives in a private temporary direct
 6. Wait a random time between 0 and `--jitter`, decrypt the session, connect and wait for login.
 7. Check the target with `GetGroupInfo(ANNOUNCE_JID)`: it must be a community's default subgroup (`IsDefaultSubGroup`), and the sender must be admin or super admin, matched by phone-number JID or LID.
 8. Send each pending item as a plain text message (`waE2E.Message{Conversation: …}`), which carries no link preview, and record it in `sent.json` straight away. The first send error or `sent.json` write error stops sending; the remaining items are reported as `failed` ("not attempted").
-9. Disconnect and encrypt the session, so the rotated keys are saved even if the acknowledgement hangs.
+9. Disconnect and encrypt a snapshot of the session, so the rotated keys are saved even if the acknowledgement hangs. The decrypted store stays open ([shutdown](#shutdown)).
 10. `POST /outbox/ack {claimId, results}`, retrying network errors, 5xx and 429 up to 3 attempts with 1 s and 2 s backoff, within its own 60-second budget.
+11. Release the session, whatever the result of the run: save it unless the most recent save succeeded, then close the store and remove the decrypted copy.
 
 Any failure (connect, logged out, stream replaced, temporary ban, refused target, send, acknowledgement or session save) exits with code 1 and writes the job summary. Unsent items from a successful claim are acknowledged as `failed`, so the Worker queues them again while attempts remain.
 
 `--dry-run` claims, connects, checks the target and prints the texts; it does not send, write `sent.json` or acknowledge, so the claimed rows return to the queue when their 10-minute lease expires.
 
 Message text appears only in `--dry-run` output and in the failure summary, never in the normal log.
+
+### Shutdown
+
+The decrypted store holds the device's Signal state: its identity, sessions, sender keys and pre-keys, plus app state and contact details. It does not hold the sent messages; the record of what was delivered is `sent.json`.
+
+whatsmeow keeps using the store after `Disconnect()` returns ([library behaviour](#library-behaviour-the-code-depends-on)), so the session is saved without closing the store, and closed only when the command ends:
+
+1. **Save** runs after `Disconnect()` returns. whatsmeow writes key changes to the store before sending anything that depends on them, and nothing can be sent after `Disconnect()`, so the store then holds every key a later run needs. Save writes a consistent copy of the open store with SQLite's `VACUUM INTO`, encrypts it into `session.db.age` and deletes the copy. Readers continue while it runs; writers wait for it, up to the 10-second `busy_timeout`.
+2. **The store stays open** while the drain acknowledges, so whatsmeow's leftover goroutines do not fail on a closed database. With the socket closed they fail at their network step instead: app state sync logs that at debug level, and others, such as a pre-key upload, may still log an error. What they write to the store after the snapshot is not kept, for example sessions deleted after an identity-change notification; the next run starts from the snapshot.
+3. **Release** closes the store and removes the decrypted copy, after a successful or a failed run. Unless the most recent save succeeded, it saves first: after a failed save, and also for a session that was opened but never saved, so a session is never closed without having been written.
+
+`--dry-run` and `wa groups` release right after saving, and `wa pair` and a failed connection save and close in one step, so in those cases leftover goroutines can still log errors about a closed database.
+
+Errors are reported as follows:
+
+- A failed first save, right after `Disconnect()`, is part of the run's result: the run fails, the job summary shows it as `close session: save session: …`, and the command exits with code 1. A successful save in Release afterwards does not clear that error; the run still exits with code 1.
+- A failure inside Release itself (its save or closing the store) makes the command exit with code 1, so the workflow run fails and GitHub emails the owner, but no job summary is written for it.
 
 ### Public output
 
@@ -146,9 +164,12 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go -C sender build ./cmd/wa
 
 ## Library behaviour the code depends on
 
-- **Pure-Go SQLite store.** `sqlstore.NewWithDB(db, "sqlite3", log)` takes the SQL dialect separately from the `database/sql` driver, and `Container.Upgrade` requires `PRAGMA foreign_keys` ([sqlstore](https://pkg.go.dev/go.mau.fi/whatsmeow/store/sqlstore#New)). [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) registers driver `sqlite` and applies `_pragma=` DSN values to every connection, so the DSN is `session.db?_pragma=foreign_keys(1)&_pragma=busy_timeout(10000)&_pragma=journal_mode(DELETE)` and the binary builds with `CGO_ENABLED=0`. `DELETE` journaling leaves no `-wal` or `-shm` files, so the closed database is a single file.
+- **Pure-Go SQLite store.** `sqlstore.NewWithDB(db, "sqlite3", log)` takes the SQL dialect separately from the `database/sql` driver, and `Container.Upgrade` requires `PRAGMA foreign_keys` ([sqlstore](https://pkg.go.dev/go.mau.fi/whatsmeow/store/sqlstore#New)). [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) registers driver `sqlite` and applies `_pragma=` DSN values to every connection, so the DSN is `session.db?_pragma=foreign_keys(1)&_pragma=busy_timeout(10000)&_pragma=journal_mode(DELETE)` and the binary builds with `CGO_ENABLED=0`. `DELETE` journaling leaves no `-wal` or `-shm` files.
+- **Snapshots.** `VACUUM INTO` writes a new database file from the content of a read transaction on the open database, so the copy is consistent and contains only committed data ([VACUUM INTO](https://www.sqlite.org/lang_vacuum.html#vacuuminto)). With rollback journaling, other readers continue while it runs and a writer waits for it to finish, within `busy_timeout` ([locking](https://www.sqlite.org/lockingv3.html)).
 - **Group fields.** `types.GroupInfo` exposes `Name`, `IsParent`, `LinkedParentJID`, `IsDefaultSubGroup` and `IsAnnounce`; participants carry `JID`, `PhoneNumber`, `LID`, `IsAdmin` and `IsSuperAdmin` ([types](https://pkg.go.dev/go.mau.fi/whatsmeow/types#GroupInfo)). In LID-addressed groups a participant's `JID` is a LID, so the admin check compares against both the device's phone JID and its LID.
 - **Pairing.** `GetQRChannel` is called before `Connect` and emits code, success, timeout, error and passkey items ([GetQRChannel](https://pkg.go.dev/go.mau.fi/whatsmeow#Client.GetQRChannel)). `PairPhone` is called after the first QR event; its display name must have the form `Browser (OS)` and is `Chrome (Linux)` ([PairPhone](https://pkg.go.dev/go.mau.fi/whatsmeow#Client.PairPhone)). A successful pairing is followed by a reconnection, so `pair` waits for `Connected`. Passkey pairing needs a WebAuthn response, which a command line cannot give.
-- **Fatal events.** `LoggedOut`, `StreamReplaced`, `TemporaryBan`, `ConnectFailure`, `ClientOutdated`, `StreamError` and `PairError` each end the run with a distinct error ([events](https://pkg.go.dev/go.mau.fi/whatsmeow/types/events)). `Disconnect()` waits for the event handlers, so store writes from the last events complete before the database is encrypted.
+- **Fatal events.** `LoggedOut`, `StreamReplaced`, `TemporaryBan`, `ConnectFailure`, `ClientOutdated`, `StreamError` and `PairError` each end the run with a distinct error ([events](https://pkg.go.dev/go.mau.fi/whatsmeow/types/events)).
+- **Shutdown.** `Disconnect()` stops the websocket and waits up to 5 seconds for the handler queue loop to end, but not for the work it started: the loop runs each incoming node's handler in its own goroutine and leaves it running when the connection closes, and several notification handlers, such as app state sync after a `server_sync` notification, start goroutines of their own. These keep using the store after `Disconnect()` returns ([client.go](https://github.com/tulir/whatsmeow/blob/main/client.go), [notification.go](https://github.com/tulir/whatsmeow/blob/main/notification.go)). The [shutdown](#shutdown) order depends on this.
+- **App state sync after disconnecting.** When `FetchAppState` fails with `ErrIQDisconnected` or `ErrNotConnected`, the `server_sync` notification handler logs at debug level and stops syncing the remaining collections; other failures are logged as errors ([notification.go](https://github.com/tulir/whatsmeow/blob/main/notification.go), `handleAppStateNotification`).
 - **Sending.** `SendMessage` returns a `SendResponse` whose `ID` is the message ID stored in `sent.json` and sent in the acknowledgement ([SendMessage](https://pkg.go.dev/go.mau.fi/whatsmeow#Client.SendMessage)).
 - **Encryption.** [filippo.io/age](https://pkg.go.dev/filippo.io/age): the `Encrypt` writer must be closed to flush the last chunk. Encrypted files are written to a temporary file in the same directory and renamed, so a crash never leaves a truncated `session.db.age`.
