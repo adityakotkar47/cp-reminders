@@ -1,9 +1,8 @@
-import { type Contest, PLATFORM, hhmmToMinutes, istClock, utcMs } from "./format.ts";
+import { type Contest, PLATFORM, utcMs } from "./format.ts";
 
 export interface Rules {
   include: Record<string, string[]>;
   maxDurationHours: number;
-  istWindow?: [string, string];
   mergeCodeforcesDivs: boolean;
   leadMinutes: number;
   minLeadMinutes: number;
@@ -20,11 +19,7 @@ function matchesRules(c: Contest, rules: Rules): boolean {
   const platform = PLATFORM[c.resource_id];
   if (!platform || c.duration > rules.maxDurationHours * 3600) return false;
   const patterns = rules.include[platform] ?? [];
-  if (!patterns.some((p) => new RegExp(p, "i").test(c.event))) return false;
-  if (!rules.istWindow) return true;
-  const { h, m } = istClock(utcMs(c.start));
-  const t = h * 60 + m;
-  return t >= hhmmToMinutes(rules.istWindow[0]) && t < hhmmToMinutes(rules.istWindow[1]);
+  return patterns.some((p) => new RegExp(p, "i").test(c.event));
 }
 
 function mergeCodeforcesDivs(contests: Contest[]): Contest[] {

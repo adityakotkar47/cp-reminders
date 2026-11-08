@@ -36,7 +36,6 @@ Configured in `config/rules.json`:
 |---|---|
 | `include` | Per platform, regexes on the contest name; a contest must match one. Defaults: Codeforces rounds and Global Rounds, CodeChef Starters, LeetCode Weekly/Biweekly, AtCoder Beginner Contests. |
 | `maxDurationHours` | Longer contests are skipped (Kotlin Heroes practice, heuristic contests, Placement Prep). |
-| `istWindow` | Optional `["HH:MM", "HH:MM"]`; only contests starting inside it are posted. Unset = any time. |
 | `mergeCodeforcesDivs` | When a Div. 1 and a Div. 2 round start together, post one reminder with the Div. 2 link, labelled `(Div. 1 + Div. 2)`. |
 | `leadMinutes` | Reminder is due this many minutes before the start (75, matching the manual median). |
 | `minLeadMinutes` | Never send when the start is closer than this, e.g. after scheduler downtime. |

@@ -36,7 +36,7 @@ export function istClock(ms: number): { h: number; m: number } {
   return { h: d.getUTCHours(), m: d.getUTCMinutes() };
 }
 
-export function hhmmToMinutes(s: string): number {
+function hhmmToMinutes(s: string): number {
   const [h, m] = s.split(":").map(Number);
   return h * 60 + m;
 }
