@@ -7,9 +7,9 @@ export interface ClaimedItem {
   deadlineUtc: string;
 }
 
-const LEASE_MS = 10 * 60_000;
-const MAX_ATTEMPTS = 3;
-const MAX_CLAIM = 5;
+export const LEASE_MS = 10 * 60_000;
+export const MAX_ATTEMPTS = 3;
+export const MAX_CLAIM = 5;
 
 const ELIGIBLE =
   "deadline_utc >= ?1 AND attempts < ?3 AND (status = 'queued' OR (status = 'claimed' AND claimed_at <= ?2))";
@@ -66,7 +66,7 @@ export interface AckResult {
   error?: string;
 }
 
-const MAX_ERROR_LENGTH = 500;
+export const MAX_ERROR_LENGTH = 500;
 const MAX_MESSAGE_ID_LENGTH = 200;
 
 function ackStatement(db: D1Database, claimId: string, r: AckResult, now: string): D1PreparedStatement {

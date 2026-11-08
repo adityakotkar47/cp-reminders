@@ -3,8 +3,8 @@ import { json } from "./http.ts";
 import type { Route } from "./router.ts";
 
 const MIN_MS = 60_000;
-const DOWN_AFTER_MS = 15 * MIN_MS;
-const CACHE_CONTROL = "max-age=300";
+export const DOWN_AFTER_MS = 15 * MIN_MS;
+export const CACHE_CONTROL = "max-age=300";
 
 interface Badge {
   schemaVersion: 1;

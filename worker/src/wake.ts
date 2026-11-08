@@ -9,7 +9,7 @@ export interface WakeResult {
   error?: string;
 }
 
-const WAKE_DEBOUNCE_MS = 4 * 60_000;
+export const WAKE_DEBOUNCE_MS = 4 * 60_000;
 const DISPATCH_TIMEOUT_MS = 8_000;
 
 async function dispatch(env: Env, fetcher: Fetcher): Promise<void> {

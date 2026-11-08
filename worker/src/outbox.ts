@@ -2,8 +2,8 @@ import { badRequest, isRecord, json, readJson } from "./http.ts";
 import { type AckResult, ackReminders, claimReminders } from "./reminders.ts";
 import type { Route } from "./router.ts";
 
-const MAX_CLAIM_ID_LENGTH = 100;
-const MAX_ACK_RESULTS = 100;
+export const MAX_CLAIM_ID_LENGTH = 100;
+export const MAX_ACK_RESULTS = 100;
 
 function parseClaimId(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 && value.length <= MAX_CLAIM_ID_LENGTH ? value : undefined;

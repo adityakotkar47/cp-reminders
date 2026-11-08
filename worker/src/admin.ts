@@ -3,8 +3,8 @@ import { badRequest, isRecord, json, readJson, text } from "./http.ts";
 import { renderPreview } from "./preview.ts";
 import type { Route } from "./router.ts";
 
-const MAX_HREF_LENGTH = 500;
-const MAX_TIP_LENGTH = 500;
+export const MAX_HREF_LENGTH = 500;
+export const MAX_TIP_LENGTH = 500;
 
 function parseHref(value: unknown): string | undefined {
   if (typeof value !== "string" || value.length === 0 || value.length > MAX_HREF_LENGTH) return undefined;
