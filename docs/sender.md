@@ -11,11 +11,11 @@ All commands are run from the repository root as `go -C sender run ./cmd/wa <com
 | Command | What it does | Touches WhatsApp |
 |---|---|---|
 | `wa keygen` | Prints a new age identity (`AGE-SECRET-KEY-1…`) and its public key. | No |
-| `wa pair --state DIR [--phone 91XXXXXXXXXX] [--force]` | Links a fresh device. It shows a QR code, or with `--phone` prints an 8-character pairing code. It waits for the first login, stays connected for `--settle` (10 s), disconnects, and writes `DIR/session.db.age`. It refuses to overwrite an existing session unless you pass `--force`. | Yes |
+| `wa pair --state DIR [--phone 91XXXXXXXXXX] [--force]` | Links a fresh device. It shows a QR code, or with `--phone` prints an 8-character pairing code. It waits for the first login, stays connected for 10 s, disconnects, and writes `DIR/session.db.age`. It refuses to overwrite an existing session unless you pass `--force`. | Yes |
 | `wa groups --state DIR` | Connects, lists joined groups (JID, name, community parent, default sub-group, linked parent, announce-only, our admin status), and prints an `ANNOUNCEMENTS CANDIDATE:` line for every default sub-group. Then it saves the session. | Yes |
 | `wa drain --state DIR [--jitter 90s] [--dry-run]` | Runs one claim, deliver and ack cycle (see [Drain](#drain)). | Only if something is pending |
 
-Common flags are `--log-level` (whatsmeow log level, default `WARN`), `--timeout` (whole run: 4 min for drain, 90 s for groups, 5 min for pair) and `--connect-timeout` (60 s).
+Common flags are `--log-level` (whatsmeow log level, default `WARN`) and `--connect-timeout` (60 s). `drain` and `groups` also take `--timeout` for the whole run (4 min and 90 s). `pair` always allows 5 min.
 
 Exit codes are `0` for success (including an empty outbox), `1` for any failure, and `2` for a usage error.
 
@@ -27,7 +27,6 @@ Exit codes are `0` for success (including an empty outbox), `1` for any failure,
 | `ANNOUNCE_JID` | drain | The only chat the sender may post to, e.g. `120363…@g.us`. It must be a group JID. Get it from `wa groups`. |
 | `WORKER_URL` | drain | Outbox base URL. The sender calls `POST {WORKER_URL}/outbox/claim` and `/outbox/ack`. |
 | `SENDER_TOKEN` | drain | Bearer token for `/outbox/*`. |
-| `ALLOW_NON_ANNOUNCE` | drain | Escape hatch. Only the exact value `1` lets the sender post to a group that is not a community default sub-group. The admin check still applies. It is not needed in normal operation. |
 | `GITHUB_STEP_SUMMARY` | drain | Set by GitHub Actions. On failure the sender appends a Markdown section to this file listing every unsent reminder's text in a fenced block, ready to paste. |
 
 ## State directory
@@ -49,8 +48,8 @@ Signal keys rotate on every connection. Once the session has been opened, every 
 4. Validate items. A claim may hold at most 5 items, otherwise all of them are refused. A key must be non-empty and unique. Text must be non-empty and at most 1000 characters. Invalid items are acked `failed` and never sent.
 5. Items whose key is already in `sent.json` are acked `sent` with the stored `messageId`, without resending. If nothing else is pending, WhatsApp is not contacted at all.
 6. Sleep a random 0..`--jitter`, decrypt the session, connect, and wait for login (60 s).
-7. Check the target with `GetGroupInfo(ANNOUNCE_JID)`. It must be a community default sub-group (`IsDefaultSubGroup`) unless `ALLOW_NON_ANNOUNCE=1`, and we must be admin or super-admin, matched by phone-number JID or LID.
-8. Send each pending item as a plain text message (`waE2E.Message{Conversation: …}`) and append it to `sent.json` immediately. On the first send error, or a `sent.json` write error, sending stops and the remaining items are reported as `failed` ("not attempted").
+7. Check the target with `GetGroupInfo(ANNOUNCE_JID)`. It must be a community default sub-group (`IsDefaultSubGroup`), and we must be admin or super-admin, matched by phone-number JID or LID.
+8. Send each pending item as a plain text message (`waE2E.Message{Conversation: …}`), never with a link preview, and append it to `sent.json` immediately. On the first send error, or a `sent.json` write error, sending stops and the remaining items are reported as `failed` ("not attempted").
 9. Disconnect and re-encrypt the session. This runs before the ack, so the rotated keys are saved even if the ack hangs.
 10. `POST /outbox/ack {claimId, results}` with up to 3 attempts, 1 s then 2 s backoff, retrying only network errors, 5xx and 429. The ack has its own 60 s budget, so it still runs when the main timeout has already expired.
 
