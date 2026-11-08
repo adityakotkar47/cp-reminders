@@ -1,16 +1,16 @@
-const NO_STORE = { "Cache-Control": "no-store" };
+const NO_STORE = "no-store";
 
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-export const json = (body: unknown, status = 200): Response =>
+export const json = (body: unknown, status = 200, cacheControl = NO_STORE): Response =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json; charset=utf-8", ...NO_STORE },
+    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": cacheControl },
   });
 
 export const text = (body: string, status = 200): Response =>
-  new Response(body, { status, headers: { "Content-Type": "text/plain; charset=utf-8", ...NO_STORE } });
+  new Response(body, { status, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": NO_STORE } });
 
 export const badRequest = (message: string): Response => json({ error: message }, 400);
 
