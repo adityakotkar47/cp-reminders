@@ -21,6 +21,26 @@ The bot posts a reminder for each selected programming contest into the Announce
 | Cloudflare D1 Free | 5 million rows read and 100,000 rows written a day, 500 MB per database [2]. |
 | GitHub Actions | A concurrency group holds at most one pending run; a newly queued run cancels and replaces the pending one [3]. |
 
+## Product decisions and trade-offs
+
+| Decision | Reason | Accepted trade-off |
+|---|---|---|
+| Post through an unofficial linked device (whatsmeow). | No official API reaches a Community's Announcements group ([research](research/official-whatsapp-apis.md)). | Unofficial clients break WhatsApp's Terms, and the account can be restricted or banned; WhatsApp publishes no thresholds ([research](research/report.md#ban-risk)). |
+| The device is a dedicated spare number that is a community admin; the owner's main number stays the community owner. | A ban then costs a SIM, not the owner's personal account or the community, and a linked device can read every chat on its account, so no personal chats are exposed. | The spare phone must open WhatsApp at least every 14 days, or the device is logged out and must be paired again. |
+| Reminders go to the Announcements group only, enforced by the sender, which refuses any chat that is not a community announcements group where it is admin. | Members of the community's other groups should not receive reminders. | None; reminders appear wherever the community's Announcements group is shown. |
+| Contests posted: every Codeforces round (Div. 1 to Div. 4, Educational, Global), CodeChef Starters, LeetCode Weekly and Biweekly, AtCoder Beginner Contests. | The contests the community follows; the configured rules reproduce every reminder the community posted by hand ([formatter.md](formatter.md)). | Other contests (CodeChef Monday Munch and Placement Prep, AtCoder ARC, AGC and heuristic contests, Kotlin Heroes, anything longer than 5 hours) get no reminder. Changing this is an edit to `worker/config/rules.json`. |
+| A Codeforces Div. 1 and Div. 2 pair starting together gets one reminder, named `(Div. 1 + Div. 2)`, with the Div. 2 link. | One post per contest slot, as the community posted them. | Div. 1 participants get the Div. 2 link. |
+| A reminder is due exactly 45 minutes before the start, with no rounding: an 8:00 PM contest is announced at 7:15 PM and an 8:05 PM contest at 7:20 PM. | Enough notice to join, close enough to the start to be remembered. | Posts land up to about 2 minutes after the due time: the cron fires every 5 minutes, the GitHub job takes seconds to start, and the sender waits a random 0–90 seconds so its sends are not machine-regular. |
+| A reminder that cannot be sent at least 10 minutes before the start is dropped and reported. | A reminder in the last minutes before a contest is noise. | An outage longer than the 35-minute window misses reminders. The badge turns red; a GitHub email arrives only when a send run itself fails, not when the Worker stops ticking. |
+| The text copies the community's manual format exactly and is sent as plain text, never with a link preview. | Familiar posts; previews clutter the group. | None. |
+| Tips come only from rules and one-off overrides written by the owner; nothing generates text. | The owner's voice; no automated content. | Most reminders carry no tip. |
+| A rescheduled contest gets a fresh reminder for its new time; a reminder already posted for the old time stays. | The sender only posts; it never edits or deletes messages. | Members may see two reminders for one contest, the first with the old time. |
+| Contest names are taken as clist reports them when the reminder is queued. | Rounds are usually named well before they start, and the snapshot refreshes hourly. | A round still under a placeholder name ("Codeforces Round (Div. 2)") is announced under it. |
+| clist.by is the contest source, with the Codeforces API as the only fallback. | One authenticated call covers all four platforms; Codeforces has an official keyless API. | While clist is down, CodeChef, LeetCode and AtCoder reminders rely on the last snapshot, so contests added during the outage are missed; the badge turns yellow. |
+| Everything runs on free tiers: Cloudflare Workers and D1 schedule, GitHub Actions sends. | $0 with no card. | GitHub's terms exclude runners for work "unrelated to" the software project, which a notifier arguably is; runners connect from datacenter addresses, which reports associate with more WhatsApp restrictions ([research](research/free-hosting.md)). |
+| A failed send is retried by later runs until the deadline, then reported; there is no paid fallback. | Most failures (a slow connection, a dropped run) clear on the next run. | When the session is logged out, every reminder misses until the number is paired again; the failure email carries each text to post by hand. |
+| The repository is private. | Workflow logs show the bot's number and run details; the `state` branch holds the encrypted session. | GitHub's CI badge is visible only to people with access to the repository. |
+
 ## Components
 
 ```mermaid
