@@ -33,7 +33,7 @@ Posts a reminder for every Codeforces, CodeChef, LeetCode and AtCoder contest in
 | `.github/workflows/` | `send.yml` drains the outbox; `ci.yml` runs the checks. |
 | `docs/` | Design and operation. |
 
-Branch `state` holds the sender's encrypted WhatsApp session and its delivery log. Each run replaces it with a single new commit; it must not be merged or deleted.
+Branch `state` holds the sender's WhatsApp login, encrypted with age (`session.db.age`; the key is the GitHub secret `AGE_IDENTITY`), and its delivery log (`sent.json`). Each run replaces it with a single new commit; it must not be merged or deleted, since deleting it logs the bot out.
 
 ## Documentation
 
@@ -54,6 +54,9 @@ Branch `state` holds the sender's encrypted WhatsApp session and its delivery lo
 | A reminder failed | GitHub emails the failed `send` run; its summary holds the text to post by hand. |
 | The sender is logged out | Pair again ([sender.md](docs/sender.md#pairing)) |
 | Keep the session alive | Open WhatsApp on the sender's phone at least every 14 days. |
+| Post to a different community | Add the sender's number to the community and make it a community admin. Find the community's Announcements JID with `wa groups` ([sender.md](docs/sender.md#announcements-jid)), then set it as the GitHub secret: `gh secret set ANNOUNCE_JID`. The next send run uses it. |
+| Rotate a Worker token or the GitHub token | Generate a new value and set it with `pnpm exec wrangler secret put <NAME>` in `worker/`. `SENDER_TOKEN` is also a GitHub secret, so set the same value with `gh secret set SENDER_TOKEN`. `GH_TOKEN` is a fine-grained token limited to this repository with Actions read and write ([architecture.md](docs/architecture.md#secrets)). |
+| Add a second trigger | Optional: an external scheduler calling `POST /tick` every 5 minutes ([scheduler.md](docs/scheduler.md#optional-second-trigger)). |
 
 ## Checks
 
