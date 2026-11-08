@@ -127,8 +127,8 @@ stateDiagram-v2
 
 | File | Content |
 |---|---|
-| `session.db.age` | The whatsmeow SQLite store, encrypted with age. Plaintext never enters the repository. |
-| `sent.json` | The last 500 reminders this sender delivered: `{key, sentAt, messageId}`. |
+| `session.db.age` | The WhatsApp login: the whatsmeow SQLite store, encrypted with age. The decryption key is the GitHub secret `AGE_IDENTITY`, never stored in the repository, so the file is unreadable without it. Each run decrypts it, connects, and commits the re-encrypted file, because the keys inside change on every connection. |
+| `sent.json` | The last 500 reminders this sender delivered: `{key, sentAt, messageId}`. Not secret. |
 
 ### Secrets
 
@@ -187,10 +187,12 @@ The README shows it through `https://img.shields.io/endpoint?url=<WORKER_URL>/ba
 
 ### Tick (Workers cron, every 5 minutes)
 
-1. If the contest snapshot is older than 60 minutes, fetch clist. If clist fails or returns nothing, fetch the Codeforces API instead: its contests replace the Codeforces ones in the snapshot, and the other platforms' upcoming contests are kept. `last_fetch_error` records the clist failure even when the fallback succeeds. If both fail, the existing snapshot stays.
-2. For every contest whose reminder is due, render the text and insert it as `queued` with `INSERT … ON CONFLICT(key) DO NOTHING`.
+1. If the contest snapshot is older than 60 minutes, fetch clist: every upcoming contest of the four platforms, up to 100, which covers everything announced, usually several weeks ahead. If clist fails or returns nothing, fetch the Codeforces API instead, which needs no key: its contests replace the Codeforces ones in the snapshot, and the other platforms' upcoming contests are kept. `last_fetch_error` records the clist failure even when the fallback succeeds. If both fail, the existing snapshot stays.
+2. For every contest starting between 45 and 10 minutes from now whose key is not in the outbox yet, render the text and insert it as `queued` with `INSERT … ON CONFLICT(key) DO NOTHING`.
 3. Mark `queued` and `claimed` rows past their deadline as `expired`.
 4. If rows are waiting (`queued`, or `claimed` with an expired lease) and the last wake was more than 4 minutes ago, dispatch `send.yml` and record `last_wake_at` on a 2xx response.
+
+The two intervals do different jobs. The snapshot is refreshed hourly because contest schedules change rarely and clist asks for caching. The tick runs every 5 minutes because it decides when a reminder goes out: a reminder is queued at most 5 minutes after it becomes due, and checking the snapshot costs one query.
 
 `POST /tick` runs the same steps, so an external scheduler such as cron-job.org can act as a second trigger. Overlapping ticks are harmless: inserts are idempotent, and an extra wake only produces a run that finds an empty outbox.
 
