@@ -14,9 +14,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// PairDisplayName is the browser/OS label sent with phone-number pairing;
-// the server only accepts common "Browser (OS)" values.
-const PairDisplayName = "Chrome (Linux)"
+const pairDisplayName = "Chrome (Linux)"
 
 // Client is a whatsmeow client that records fatal connection events.
 type Client struct {
@@ -104,7 +102,7 @@ func (c *Client) PairWithPhone(ctx context.Context, phone string, show func(code
 			return nil
 		}
 		requested = true
-		code, err := c.PairPhone(ctx, phone, true, whatsmeow.PairClientChrome, PairDisplayName)
+		code, err := c.PairPhone(ctx, phone, true, whatsmeow.PairClientChrome, pairDisplayName)
 		if err != nil {
 			return fmt.Errorf("%w: request pairing code: %w", ErrPairing, err)
 		}

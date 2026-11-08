@@ -10,8 +10,7 @@ import (
 	"filippo.io/age"
 )
 
-// ErrInvalidIdentity is returned when an age identity cannot be parsed.
-var ErrInvalidIdentity = errors.New("invalid age X25519 identity")
+var errInvalidIdentity = errors.New("invalid age X25519 identity")
 
 // Vault encrypts and decrypts state files to a single age X25519 identity.
 type Vault struct {
@@ -31,8 +30,7 @@ func GenerateIdentity() (identity, recipient string, err error) {
 func NewVault(identity string) (*Vault, error) {
 	id, err := age.ParseX25519Identity(strings.TrimSpace(identity))
 	if err != nil {
-		// The parse error can quote parts of the secret, so it is dropped.
-		return nil, ErrInvalidIdentity
+		return nil, errInvalidIdentity
 	}
 	return &Vault{id: id}, nil
 }
