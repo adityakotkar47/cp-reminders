@@ -32,6 +32,7 @@ Posts a reminder for every Codeforces, CodeChef, LeetCode and AtCoder contest in
 | `sender/` | Go WhatsApp sender. |
 | `.github/workflows/` | `send.yml` drains the outbox; `ci.yml` runs the checks. |
 | `docs/` | Design and operation. |
+| `docs/pfp/` | The sender's WhatsApp profile picture: `books-cascade.svg` is the source, `books-cascade.png` the 640×640 image set on the account. |
 
 Branch `state` holds the sender's WhatsApp login, encrypted with age (`session.db.age`; the key is the GitHub secret `AGE_IDENTITY`), and its delivery log (`sent.json`). Each run replaces it with a single new commit; it must not be merged or deleted, since deleting it logs the bot out.
 
