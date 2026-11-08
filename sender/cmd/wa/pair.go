@@ -16,15 +16,17 @@ import (
 	"cp-reminders/sender/internal/wa"
 )
 
-const deviceOSName = "cp-reminders"
+const (
+	deviceOSName = "cp-reminders"
+	pairTimeout  = 5 * time.Minute
+	settleTime   = 10 * time.Second
+)
 
 func runPair(ctx context.Context, args []string, getenv func(string) string, out io.Writer) error {
 	f := newFlags("pair", out, true)
 	phone := f.String("phone", "", "pair with a code entered on the phone instead of a QR; international format without +, e.g. 91XXXXXXXXXX")
 	force := f.Bool("force", false, "replace an existing session in --state")
-	timeout := f.Duration("timeout", 5*time.Minute, "limit for the whole pairing")
 	connectTimeout := f.Duration("connect-timeout", 60*time.Second, "limit for the first login after pairing")
-	settle := f.Duration("settle", 10*time.Second, "how long to stay connected after the first login")
 	if err := f.parse(args); err != nil {
 		return err
 	}
@@ -39,7 +41,7 @@ func runPair(ctx context.Context, args []string, getenv func(string) string, out
 		return fmt.Errorf("create state dir: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, *timeout)
+	ctx, cancel := context.WithTimeout(ctx, pairTimeout)
 	defer cancel()
 	log := f.logger()
 	store.SetOSInfo(deviceOSName, [3]uint32{1, 0, 0})
@@ -67,7 +69,7 @@ func runPair(ctx context.Context, args []string, getenv func(string) string, out
 
 	err = cli.WaitConnected(ctx, *connectTimeout)
 	if err == nil {
-		err = settleFor(ctx, cli, *settle)
+		err = settleFor(ctx, cli, settleTime)
 	}
 	cli.Disconnect()
 	if cerr := sess.Commit(); cerr != nil {

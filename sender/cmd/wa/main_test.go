@@ -240,6 +240,15 @@ func TestPairRefusesExistingSessionWithoutForce(t *testing.T) {
 	}
 }
 
+func TestPairHasNoTuningFlags(t *testing.T) {
+	for _, flag := range []string{"--settle", "--timeout"} {
+		err := run(context.Background(), []string{"pair", "--state", t.TempDir(), flag, "1s"}, envMap(nil), io.Discard)
+		if !errors.Is(err, errUsage) {
+			t.Errorf("pair %s: got %v, want errUsage", flag, err)
+		}
+	}
+}
+
 func TestCommandsRequireIdentity(t *testing.T) {
 	for _, cmd := range []string{"pair", "groups"} {
 		err := run(context.Background(), []string{cmd, "--state", t.TempDir()}, envMap(nil), io.Discard)
