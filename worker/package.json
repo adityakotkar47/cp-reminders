@@ -8,7 +8,6 @@
     "types": "wrangler types --strict-vars false",
     "typecheck": "pnpm run types && tsc --noEmit",
     "test": "pnpm run types && vitest run",
-    "bundle": "wrangler deploy --dry-run --outdir dist",
     "db:migrate:local": "wrangler d1 migrations apply cp-reminders --local",
     "db:migrate:remote": "wrangler d1 migrations apply cp-reminders --remote"
   },

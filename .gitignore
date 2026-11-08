@@ -7,5 +7,4 @@ session.db*
 /state/
 .wrangler/
 .claude/
-dist/
 worker-configuration.d.ts

@@ -96,8 +96,6 @@ Deviation from the lifecycle diagram: a `sent` ack is also accepted for a row th
 | D1 rows written | About 300 meta upserts, 24 snapshots, a handful of reminder rows | 100,000 per day |
 | D1 rows read | Low thousands | 5,000,000 per day |
 
-Bundle size from `wrangler deploy --dry-run --outdir dist` is about 16 KiB (6 KiB gzip).
-
 ## Setup
 
 All commands run in `worker/`. Nothing here is done by the build agent; it needs your Cloudflare and GitHub accounts.
@@ -142,10 +140,10 @@ curl -X POST -H "Authorization: Bearer $TICK_TOKEN" "$BASE/tick"
 ## Development
 
 ```sh
-pnpm run typecheck   # wrangler types (generates worker-configuration.d.ts), then tsc --noEmit
-pnpm test           # wrangler types, then vitest in the Workers runtime with a real local D1
-pnpm run bundle      # wrangler deploy --dry-run --outdir dist
-pnpm run dev         # wrangler dev --test-scheduled
+pnpm run typecheck          # wrangler types (generates worker-configuration.d.ts), then tsc --noEmit
+pnpm test                   # wrangler types, then vitest in the Workers runtime with a real local D1
+pnpm run db:migrate:local   # apply migrations/ to the local D1 that wrangler dev uses
+pnpm run dev                # wrangler dev --test-scheduled
 ```
 
 Tests use [`@cloudflare/vitest-plugin`](https://developers.cloudflare.com/workers/testing/vitest-integration/get-started/write-your-first-test/) (the successor of the deprecated `@cloudflare/vitest-pool-workers`) with Vitest 4. Migrations from `migrations/` are applied to the test D1 in `test/setup.ts`. Outbound HTTP is replaced by an injected fetcher (unit tests) or by spying on `globalThis.fetch` (route tests); no test touches the network. The compatibility date in `wrangler.jsonc` is `2026-11-01`, which is later than the plugin's minimum of `2022-10-31` and not later than the installed workerd supports.
