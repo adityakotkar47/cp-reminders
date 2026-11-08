@@ -1,54 +1,33 @@
 # GitHub Actions workflows
 
-Two workflows live in `.github/workflows/`. Actions are pinned to full commit SHAs with the release in a trailing comment; update them deliberately.
+`.github/workflows/` holds two workflows. Every action is pinned to a full commit SHA, with its release in a trailing comment.
 
-## send.yml: wake and drain
+## send.yml: drain the outbox
 
-Triggered only by `workflow_dispatch` from the Worker (`POST /repos/{owner}/{repo}/actions/workflows/send.yml/dispatches`, body `{"ref":"main"}`, no inputs). There is no `schedule` trigger. The Worker's debounce and the outbox make extra or lost wake-ups harmless.
+The Worker starts `send.yml` through `workflow_dispatch` with no inputs ([architecture.md](architecture.md#workflow-dispatch)); it has no other trigger. Because every run drains the whole outbox, an extra or a missing wake-up does no harm.
 
-| Aspect | Choice | Why |
+| Aspect | Setting | Reason |
 |---|---|---|
-| Concurrency | `group: wa-session`, `cancel-in-progress: false` | WhatsApp allows one live connection and the session keys rotate on every connect, so runs must be serialised. Per [GitHub's concurrency docs](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/control-the-concurrency-of-workflows-and-jobs), a running job is never cancelled with `false`, and at most one run waits as `pending`; a newer pending run replaces an older one. That is safe here because every run drains the whole outbox. |
-| Permissions | `contents: write` only | Needed to push the `state` branch with the built-in token. Nothing else is granted. |
-| Timeout | 6 minutes | Covers the 90 s jitter, connect, send and ack with margin. |
-| Checkout | `main`, `persist-credentials: false` | The token is not left in `.git/config` while the sender runs. |
-| State branch | Fetched into `./state` with an `http.extraheader` built from `github.token` for that command only | No credential persists. If branch `state` does not exist, the step starts an empty orphan repository and the first run creates the branch. |
-| Secrets | Passed through `env:` on the step, never interpolated into the script | `${{ }}` appears only in `env:` and `with:` values, so no secret or input is ever expanded into shell text. |
-| Persist step | `if: always()` | The session keys rotate on every connection, so state must be saved even when the drain fails. |
+| Concurrency | `group: wa-session`, `cancel-in-progress: false` | WhatsApp allows one live connection per session and the keys rotate on every connection, so runs are serialised. A running job is never cancelled, and at most one run waits as pending; a newer pending run replaces it ([concurrency](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/control-the-concurrency-of-workflows-and-jobs)). |
+| Permissions | `contents: write` | Pushing branch `state` with the built-in token. |
+| Timeout | 6 minutes | The sender's own limit is 4 minutes, including up to 90 s of jitter. |
+| Checkout | `main` with `persist-credentials: false` | No token remains in `.git/config` while the sender runs. |
+| Secrets | Passed to the step through `env:` | Expressions appear only in `env:` and `with:`, never inside a script. The secrets are listed in [architecture.md](architecture.md#secrets). |
 
-### Persist step
+Steps:
 
-1. Skip if `./state` is not a repository or `session.db.age` and `sent.json` are unchanged.
-2. Create an orphan branch, add exactly `session.db.age` and `sent.json` (an allowlist, so a stray plaintext `session.db` can never be committed), commit once as `github-actions[bot]`.
-3. `git push --force-with-lease="state:<sha fetched at start>" origin next:refs/heads/state`. An empty expected sha means the ref must not exist yet. If something else moved the branch meanwhile, the push is rejected instead of overwriting it.
-
-The branch therefore always holds one commit and the repository does not grow. The sender writes its own markdown failure report to `$GITHUB_STEP_SUMMARY`; the workflow does not duplicate it, and GitHub emails on failure.
-
-### Secrets
-
-`send.yml` reads the GitHub secrets listed in [architecture.md](architecture.md#secrets) (repository Settings, Secrets and variables, Actions).
-
-### Does `workflow_dispatch` get disabled for inactivity?
-
-No. GitHub documents the 60-day rule only for scheduled workflows: "In a public repository, scheduled workflows are automatically disabled when no repository activity has occurred in 60 days" ([disabling and enabling a workflow](https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-workflow-runs/disabling-and-enabling-a-workflow)). `send.yml` has no `schedule`, so no keepalive workflow is needed.
-
-### Dispatch response
-
-How the Worker treats the dispatch response is described in [architecture.md](architecture.md#tick-every-5-minutes-from-two-independent-triggers) (step 4).
-
-### Go module location
-
-`sender/` is its own Go module (`github.com/adityakotkar47/cp-reminders/sender`), so the workflow runs `go run ./cmd/wa drain --state "$GITHUB_WORKSPACE/state"` with `working-directory: sender`, not `go run ./sender/cmd/wa` from the repository root. `setup-go` reads `sender/go.mod` and caches on `sender/go.sum`.
+1. **Fetch state branch.** Initialises `./state` as a repository on branch `state` and fetches branch `state` with an `http.extraheader` built from `github.token` for that command only. When the branch does not exist yet, `./state` stays an empty orphan branch. The fetched commit is kept as `STATE_SHA`.
+2. **Set up Go** from `sender/go.mod`, with the module cache keyed on `sender/go.sum`.
+3. **Drain the outbox.** `go run ./cmd/wa drain --state "$GITHUB_WORKSPACE/state"` in `sender/`, which is its own module (`github.com/adityakotkar47/cp-reminders/sender`). On failure the sender writes the unsent texts to the job summary, and GitHub emails the owner about the failed run.
+4. **Persist state** (`if: always()`, because the keys rotate even when the drain fails). If `session.db.age` or `sent.json` changed, the step commits exactly those files, and only those that exist, as a single orphan commit by `github-actions[bot]`, then runs `git push --force-with-lease="state:$STATE_SHA" origin next:refs/heads/state`. The allowlist keeps a plaintext `session.db` out of the repository, the single commit keeps the repository from growing, and the lease rejects the push if the branch moved since step 1; an empty `STATE_SHA` requires that the branch does not exist.
 
 ## ci.yml: checks
 
-Runs on push and pull request with `permissions: contents: read` and a concurrency group that cancels superseded runs of the same ref. Two independent jobs:
+Runs on every push and pull request, with `contents: read` and a concurrency group that cancels older runs for the same ref. It uses no secrets.
 
 | Job | Steps |
 |---|---|
-| `worker` | `pnpm/setup` (installs Node 24, pnpm from the root `packageManager`, and the workspace), then `pnpm --filter cp-reminders-worker typecheck` and `test`. The tests run in the Workers runtime with a local D1 and include the core golden tests in `worker/test/core/`. |
-| `sender` | In `sender/`: `go vet ./...`, `go test ./...`. |
+| `worker` | [`pnpm/setup`](https://github.com/pnpm/setup) installs Node 24, the pnpm version in the root `packageManager` field, and the workspace; then `pnpm --filter cp-reminders-worker typecheck` and `test`. The tests include the golden tests in `worker/test/core/`. |
+| `sender` | `go vet ./...` and `go test ./...` in `sender/`. |
 
-The root `package.json` holds only `name`, `private` and `packageManager`. [`pnpm/setup`](https://github.com/pnpm/setup) reads the pnpm version from `packageManager` and runs `pnpm install` only when a `package.json` is present, so the workspace root keeps that minimal manifest.
-
-`ci.yml` uses no secrets.
+The root `package.json` contains only `name`, `private` and `packageManager`: `pnpm/setup` takes the pnpm version from it and runs `pnpm install` when a `package.json` is present.
