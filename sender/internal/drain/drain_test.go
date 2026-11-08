@@ -245,19 +245,19 @@ func TestSendsPendingItemsThenClosesThenAcks(t *testing.T) {
 
 func TestAllItemsAlreadySentSkipsWhatsApp(t *testing.T) {
 	h := newHarness(item("k1", "first"))
-	h.ledger.entries["k1"] = state.Entry{Key: "k1", MessageID: "OLD1"}
+	h.ledger.entries["k1"] = state.Entry{Key: "k1", MessageID: "PREV1"}
 	if err := h.d.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if h.rec.index("dial") >= 0 || h.rec.index("sleep 30s") >= 0 {
 		t.Errorf("connected although nothing was pending: %v", h.rec.events)
 	}
-	wantResults(t, h.ack(t).Results, outbox.Result{Key: "k1", Status: outbox.StatusSent, MessageID: "OLD1"})
+	wantResults(t, h.ack(t).Results, outbox.Result{Key: "k1", Status: outbox.StatusSent, MessageID: "PREV1"})
 }
 
 func TestLedgerHitIsNotResent(t *testing.T) {
 	h := newHarness(item("k1", "first"), item("k2", "second"))
-	h.ledger.entries["k1"] = state.Entry{Key: "k1", MessageID: "OLD1"}
+	h.ledger.entries["k1"] = state.Entry{Key: "k1", MessageID: "PREV1"}
 	if err := h.d.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestLedgerHitIsNotResent(t *testing.T) {
 		t.Errorf("sent: %v", h.sess.sent)
 	}
 	wantResults(t, h.ack(t).Results,
-		outbox.Result{Key: "k1", Status: outbox.StatusSent, MessageID: "OLD1"},
+		outbox.Result{Key: "k1", Status: outbox.StatusSent, MessageID: "PREV1"},
 		outbox.Result{Key: "k2", Status: outbox.StatusSent, MessageID: "MSG1"})
 }
 
