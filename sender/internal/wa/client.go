@@ -71,11 +71,15 @@ func (c *Client) SendText(ctx context.Context, to types.JID, text string) (types
 	if err := c.Err(); err != nil {
 		return "", err
 	}
-	resp, err := c.SendMessage(ctx, to, &waE2E.Message{Conversation: proto.String(text)})
+	resp, err := c.SendMessage(ctx, to, textMessage(text))
 	if err != nil {
 		return "", fmt.Errorf("send message: %w", errors.Join(err, c.Err()))
 	}
 	return resp.ID, nil
+}
+
+func textMessage(text string) *waE2E.Message {
+	return &waE2E.Message{Conversation: proto.String(text)}
 }
 
 // PairQR links a new device by QR code, calling show for every code.

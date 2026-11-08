@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestWatcherFatalEvents(t *testing.T) {
@@ -207,5 +209,19 @@ func TestIsAdmin(t *testing.T) {
 	}
 	if IsAdmin(group(types.GroupParticipant{JID: types.EmptyJID, IsAdmin: true}), types.EmptyJID) {
 		t.Error("empty self JID matched an empty participant JID")
+	}
+}
+
+func TestTextMessageIsPlainConversationWithoutPreview(t *testing.T) {
+	const text = "Codeforces Round starts in 75 min\nhttps://codeforces.com/contests/2000"
+	msg := textMessage(text)
+	if msg.GetConversation() != text {
+		t.Errorf("Conversation: got %q, want %q", msg.GetConversation(), text)
+	}
+	if msg.ExtendedTextMessage != nil {
+		t.Errorf("ExtendedTextMessage set: %v", msg.ExtendedTextMessage)
+	}
+	if want := (&waE2E.Message{Conversation: proto.String(text)}); !proto.Equal(msg, want) {
+		t.Errorf("message has fields beyond Conversation: %v", msg)
 	}
 }
