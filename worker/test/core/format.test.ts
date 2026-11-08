@@ -95,6 +95,14 @@ describe("selection", () => {
   });
 });
 
+test("Codeforces links use the /contests/ page, which opens before the round starts", () => {
+  const c = byEvent("Codeforces Round 1134 (Div. 4)");
+  expect(formatReminder(c)).toMatch(/\n🔗 Contest Link: https:\/\/codeforces\.com\/contests\/2290$/);
+  for (const href of ["https://codeforces.com/contest/2290", "https://codeforces.com/contest/2290/"]) {
+    expect(formatReminder({ ...c, href })).toMatch(/\n🔗 Contest Link: https:\/\/codeforces\.com\/contests\/2290$/);
+  }
+});
+
 test("sponsored Codeforces names are normalised", () => {
   const c = past.find((x) => x.event.startsWith("DeepInfra Round 1"))!;
   expect(formatReminder(c)).toMatch(/Contest Name: Codeforces Round 1126 \(Div\. 1 \+ Div\. 2\)\n/);

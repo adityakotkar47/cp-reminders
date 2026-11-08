@@ -75,8 +75,19 @@ function displayName(c: Contest): string {
   }
 }
 
+const CODEFORCES_CONTEST_LINK = /^https:\/\/codeforces\.com\/contests?\/(\d+)\/?$/;
+
 function displayLink(c: Contest): string {
-  return c.resource_id === 102 && !c.href.endsWith("/") ? `${c.href}/` : c.href;
+  switch (c.resource_id) {
+    case 1: {
+      const m = c.href.match(CODEFORCES_CONTEST_LINK);
+      return m ? `https://codeforces.com/contests/${m[1]}` : c.href;
+    }
+    case 102:
+      return c.href.endsWith("/") ? c.href : `${c.href}/`;
+    default:
+      return c.href;
+  }
 }
 
 function pickTip(c: Contest, tips: readonly Tip[], overrides: TipOverrides = {}): string | undefined {
