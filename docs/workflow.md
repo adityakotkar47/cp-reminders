@@ -24,16 +24,9 @@ Triggered only by `workflow_dispatch` from the Worker (`POST /repos/{owner}/{rep
 
 The branch therefore always holds one commit and the repository does not grow. The sender writes its own markdown failure report to `$GITHUB_STEP_SUMMARY`; the workflow does not duplicate it, and GitHub emails on failure.
 
-### Secrets (repository, Settings, Secrets and variables, Actions)
+### Secrets
 
-| Name | Used for |
-|---|---|
-| `WORKER_URL` | Base URL of the Worker, for `/outbox/*`. |
-| `SENDER_TOKEN` | Bearer token for `/outbox/*`. Same value as the Worker secret. |
-| `AGE_IDENTITY` | age identity that decrypts and re-encrypts `session.db.age`. |
-| `ANNOUNCE_JID` | The only chat the sender may post to. |
-
-The Worker's `GH_TOKEN` (fine-grained PAT, Actions: read and write) is a Worker secret, not a GitHub one.
+`send.yml` reads the GitHub secrets listed in [architecture.md](architecture.md#secrets) (repository Settings, Secrets and variables, Actions).
 
 ### Does `workflow_dispatch` get disabled for inactivity?
 
@@ -41,11 +34,11 @@ No. GitHub documents the 60-day rule only for scheduled workflows: "In a public 
 
 ### Dispatch response
 
-The REST reference for [creating a workflow dispatch event](https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event) requires `ref`, treats `inputs` as optional, and currently documents a 200 response with the run id (it used to be 204). The Worker accepts any 2xx.
+How the Worker treats the dispatch response is described in [architecture.md](architecture.md#tick-every-5-minutes-from-two-independent-triggers) (step 4).
 
 ### Go module location
 
-`sender/` is its own Go module (`cp-reminders/sender`), so the workflow runs `go run ./cmd/wa drain --state "$GITHUB_WORKSPACE/state"` with `working-directory: sender`, not `go run ./sender/cmd/wa` from the repository root. `setup-go` reads `sender/go.mod` and caches on `sender/go.sum`.
+`sender/` is its own Go module (`github.com/adityakotkar47/cp-reminders/sender`), so the workflow runs `go run ./cmd/wa drain --state "$GITHUB_WORKSPACE/state"` with `working-directory: sender`, not `go run ./sender/cmd/wa` from the repository root. `setup-go` reads `sender/go.mod` and caches on `sender/go.sum`.
 
 ## ci.yml: checks
 
@@ -58,4 +51,4 @@ Runs on push and pull request with `permissions: contents: read` and a concurren
 
 The root `package.json` holds only `name`, `private` and `packageManager`. [`pnpm/setup`](https://github.com/pnpm/setup) reads the pnpm version from `packageManager` and runs `pnpm install` only when a `package.json` is present, so the workspace root keeps that minimal manifest.
 
-Neither workflow needs a secret to run CI.
+`ci.yml` uses no secrets.
