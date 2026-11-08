@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { rules } from "../src/config.ts";
 import { type Contest, isoUtc, utcMs } from "../src/core/format.ts";
-import { reminderKey } from "../src/core/select.ts";
+import { reminderKey, selectContests } from "../src/core/select.ts";
 import upcoming from "./fixtures/clist-upcoming.json" with { type: "json" };
 import type { Fetcher } from "../src/env.ts";
 
@@ -9,11 +9,11 @@ export const MIN = 60_000;
 
 export const fixtureContests = upcoming.objects as unknown as Contest[];
 
-export const STARTERS_264 = fixtureContests.find((c) => c.event === "Starters 264")!;
-export const STARTERS_264_START = utcMs(STARTERS_264.start);
-export const STARTERS_264_KEY = reminderKey(STARTERS_264);
-export const STARTERS_264_DEADLINE = STARTERS_264_START - rules.minLeadMinutes * MIN;
-export const NOW = STARTERS_264_START - rules.leadMinutes * MIN;
+export const TARGET = selectContests(fixtureContests, rules)[0]!;
+export const TARGET_START = utcMs(TARGET.start);
+export const TARGET_KEY = reminderKey(TARGET);
+export const TARGET_DEADLINE = TARGET_START - rules.minLeadMinutes * MIN;
+export const NOW = TARGET_START - rules.leadMinutes * MIN;
 
 interface Call {
   url: string;

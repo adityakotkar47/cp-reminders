@@ -1,7 +1,10 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { formatTime, istClock } from "../src/core/format.ts";
-import { NOW, fixtureContests, mockFetch, resetDb } from "./helpers.ts";
+import { MAX_TIP_LENGTH } from "../src/admin.ts";
+import { baseOverrides, rules, tipRules } from "../src/config.ts";
+import { formatReminder, formatTime, isoUtc, istClock } from "../src/core/format.ts";
+import { PREVIEW_LIMIT } from "../src/preview.ts";
+import { MIN, NOW, TARGET, mockFetch, resetDb } from "./helpers.ts";
 
 beforeEach(async () => {
   await resetDb();
@@ -23,7 +26,7 @@ const request = (method: string, path: string, body?: unknown, token: string | n
 const tipRow = (href: string) =>
   env.DB.prepare("SELECT tip, updated_at FROM tip_overrides WHERE href = ?1").bind(href).first<{ tip: string; updated_at: string }>();
 
-const HREF = "https://www.codechef.com/START264";
+const HREF = TARGET.href;
 
 describe.each([
   ["PUT", "/tips", { href: HREF, tip: "t" }],
@@ -61,7 +64,7 @@ describe("PUT /tips", () => {
     ["non-url href", { href: "not a url", tip: "t" }],
     ["missing tip", { href: HREF }],
     ["non-string tip", { href: HREF, tip: 4 }],
-    ["oversized tip", { href: HREF, tip: "x".repeat(501) }],
+    ["oversized tip", { href: HREF, tip: "x".repeat(MAX_TIP_LENGTH + 1) }],
   ])("rejects %s with 400", async (_name, body) => {
     expect((await request("PUT", "/tips", body)).status).toBe(400);
     expect(await tipRow(HREF)).toBeNull();
@@ -94,9 +97,9 @@ describe("GET /preview", () => {
     expect(res.headers.get("Content-Type")).toMatch(/text\/plain/);
     const body = await res.text();
     const { h, m } = istClock(NOW);
-    expect(body).toContain(`#1  sends Wed 11 Nov 2026, ${formatTime(h, m)} IST`);
-    expect(body).toContain("Contest Name: Starters 264");
-    expect(body.match(/^#\d+ /gm)!.length).toBeLessThanOrEqual(10);
+    expect(body.split("\n")[0]).toMatch(new RegExp(`^#1  sends .+, ${formatTime(h, m)} IST$`));
+    expect(body).toContain(formatReminder(TARGET, tipRules, baseOverrides));
+    expect(body.match(/^#\d+ /gm)!.length).toBeLessThanOrEqual(PREVIEW_LIMIT);
   });
 
   it("reflects stored tip overrides", async () => {
@@ -110,16 +113,15 @@ describe("GET /preview", () => {
     expect(await (await request("GET", "/preview")).text()).toBe("No upcoming reminders.\n");
   });
 
-  it("covers at most the next 10 reminders", async () => {
-    const many = Array.from({ length: 14 }, (_, i) => ({
-      ...fixtureContests.find((c) => c.href.endsWith("START264"))!,
-      href: `https://www.codechef.com/START${500 + i}`,
-      event: `Starters ${500 + i}`,
-      start: new Date(NOW + (80 + i * 60) * 60_000).toISOString().slice(0, 19),
+  it("covers at most the next PREVIEW_LIMIT reminders", async () => {
+    const many = Array.from({ length: PREVIEW_LIMIT + 4 }, (_, i) => ({
+      ...TARGET,
+      href: `${TARGET.href}-${i}`,
+      start: isoUtc(NOW + (rules.leadMinutes + 60 * (i + 1)) * MIN).slice(0, 19),
     }));
     const mock = mockFetch({ clist: () => new Response(JSON.stringify({ objects: many }), { status: 200 }) });
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => mock.fetcher(String(input), init));
     const body = await (await request("GET", "/preview")).text();
-    expect(body.match(/^#\d+ /gm)).toHaveLength(10);
+    expect(body.match(/^#\d+ /gm)).toHaveLength(PREVIEW_LIMIT);
   });
 });

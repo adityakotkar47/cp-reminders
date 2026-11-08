@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { isoUtc } from "../src/core/format.ts";
-import { ackReminders, claimReminders } from "../src/reminders.ts";
+import { LEASE_MS, MAX_ATTEMPTS, MAX_ERROR_LENGTH, ackReminders, claimReminders } from "../src/reminders.ts";
 import { MIN, NOW, getReminder, resetDb, seedReminder } from "./helpers.ts";
 
 beforeEach(resetDb);
@@ -25,7 +25,7 @@ describe("ackReminders", () => {
   });
 
   it("requeues a failed reminder while attempts remain and records the error", async () => {
-    await claimed("a", 2);
+    await claimed("a", MAX_ATTEMPTS - 1);
     const applied = await ackReminders(env, "c1", [{ key: "a", status: "failed", error: "socket closed" }], NOW);
     expect(applied).toBe(1);
     expect(await getReminder("a")).toMatchObject({
@@ -33,16 +33,16 @@ describe("ackReminders", () => {
       claim_id: null,
       claimed_at: null,
       last_error: "socket closed",
-      attempts: 2,
+      attempts: MAX_ATTEMPTS - 1,
     });
     const again = await claimReminders(env, "c2", NOW);
     expect(again.map((i) => i.key)).toEqual(["a"]);
   });
 
-  it("marks a reminder failed once the third attempt fails", async () => {
-    await claimed("a", 3);
+  it("marks a reminder failed once the last attempt fails", async () => {
+    await claimed("a", MAX_ATTEMPTS);
     await ackReminders(env, "c1", [{ key: "a", status: "failed", error: "banned" }], NOW);
-    expect(await getReminder("a")).toMatchObject({ status: "failed", last_error: "banned", attempts: 3 });
+    expect(await getReminder("a")).toMatchObject({ status: "failed", last_error: "banned", attempts: MAX_ATTEMPTS });
     expect(await claimReminders(env, "c2", NOW)).toEqual([]);
   });
 
@@ -56,8 +56,8 @@ describe("ackReminders", () => {
   it("ignores an ack from a claim that was superseded after its lease expired", async () => {
     await seedReminder({ key: "a" });
     await claimReminders(env, "old", NOW);
-    await claimReminders(env, "new", NOW + 11 * MIN);
-    const applied = await ackReminders(env, "old", [{ key: "a", status: "failed", error: "late" }], NOW + 12 * MIN);
+    await claimReminders(env, "new", NOW + LEASE_MS);
+    const applied = await ackReminders(env, "old", [{ key: "a", status: "failed", error: "late" }], NOW + LEASE_MS + MIN);
     expect(applied).toBe(0);
     expect(await getReminder("a")).toMatchObject({ status: "claimed", claim_id: "new" });
   });
@@ -104,7 +104,7 @@ describe("ackReminders", () => {
 
   it("truncates oversized error text", async () => {
     await claimed("a");
-    await ackReminders(env, "c1", [{ key: "a", status: "failed", error: "x".repeat(5000) }], NOW);
-    expect((await getReminder("a"))?.last_error).toHaveLength(500);
+    await ackReminders(env, "c1", [{ key: "a", status: "failed", error: "x".repeat(MAX_ERROR_LENGTH + 100) }], NOW);
+    expect((await getReminder("a"))?.last_error).toHaveLength(MAX_ERROR_LENGTH);
   });
 });

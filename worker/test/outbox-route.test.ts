@@ -1,5 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { MAX_ACK_RESULTS, MAX_CLAIM_ID_LENGTH } from "../src/outbox.ts";
+import { MAX_ATTEMPTS } from "../src/reminders.ts";
 import { NOW, getReminder, resetDb, seedReminder } from "./helpers.ts";
 
 beforeEach(resetDb);
@@ -62,7 +64,7 @@ describe("POST /outbox/claim", () => {
     ["missing claimId", {}],
     ["empty claimId", { claimId: "" }],
     ["non-string claimId", { claimId: 5 }],
-    ["oversized claimId", { claimId: "x".repeat(200) }],
+    ["oversized claimId", { claimId: "x".repeat(MAX_CLAIM_ID_LENGTH + 1) }],
   ])("rejects %s with 400", async (_name, body) => {
     expect((await post("/outbox/claim", body)).status).toBe(400);
   });
@@ -85,7 +87,7 @@ describe("POST /outbox/ack", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ applied: 2 });
     expect(await getReminder("a")).toMatchObject({ status: "sent", message_id: "WAMID.1" });
-    expect(await getReminder("b")).toMatchObject({ status: "queued", last_error: "closed" });
+    expect(await getReminder("b")).toMatchObject({ status: MAX_ATTEMPTS > 1 ? "queued" : "failed", last_error: "closed" });
   });
 
   it("ignores an ack for a different claimId", async () => {
@@ -101,7 +103,7 @@ describe("POST /outbox/ack", () => {
     ["results not an array", { claimId: "c", results: "x" }],
     ["unknown status", { claimId: "c", results: [{ key: "a", status: "done" }] }],
     ["missing key", { claimId: "c", results: [{ status: "sent" }] }],
-    ["too many results", { claimId: "c", results: Array.from({ length: 101 }, (_, i) => ({ key: `k${i}`, status: "sent" })) }],
+    ["too many results", { claimId: "c", results: Array.from({ length: MAX_ACK_RESULTS + 1 }, (_, i) => ({ key: `k${i}`, status: "sent" })) }],
   ])("rejects %s with 400", async (_name, body) => {
     expect((await post("/outbox/ack", body)).status).toBe(400);
   });

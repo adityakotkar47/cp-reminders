@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { ensureSnapshot } from "../src/contests.ts";
+import { SNAPSHOT_TTL_MS, ensureSnapshot } from "../src/contests.ts";
 import { isoUtc } from "../src/core/format.ts";
 import { getMeta } from "../src/meta.ts";
 import { MIN, NOW, fixtureContests, jsonResponse, mockFetch, resetDb } from "./helpers.ts";
@@ -45,14 +45,14 @@ describe("ensureSnapshot: clist", () => {
     expect(await getMeta(env.DB, "last_fetch_error")).toBeNull();
   });
 
-  it("does not refetch within 60 minutes but does after", async () => {
+  it("does not refetch while the snapshot is fresh but does once it is stale", async () => {
     const { fetcher, calls } = mockFetch();
     await ensureSnapshot(env, NOW, fetcher);
-    const cached = await ensureSnapshot(env, NOW + 59 * MIN, fetcher);
+    const cached = await ensureSnapshot(env, NOW + SNAPSHOT_TTL_MS - MIN, fetcher);
     expect(cached.fetched).toBe(false);
     expect(cached.contests).toHaveLength(fixtureContests.length);
     expect(calls.clist).toHaveLength(1);
-    await ensureSnapshot(env, NOW + 60 * MIN, fetcher);
+    await ensureSnapshot(env, NOW + SNAPSHOT_TTL_MS, fetcher);
     expect(calls.clist).toHaveLength(2);
   });
 });
@@ -60,7 +60,7 @@ describe("ensureSnapshot: clist", () => {
 describe("ensureSnapshot: Codeforces fallback", () => {
   it("falls back when clist returns a non-2xx status", async () => {
     const { fetcher: first } = mockFetch();
-    await ensureSnapshot(env, NOW - 2 * 60 * MIN, first);
+    await ensureSnapshot(env, NOW - 2 * SNAPSHOT_TTL_MS, first);
 
     const start = Math.floor((NOW + 60 * MIN) / 1000);
     const { fetcher, calls } = mockFetch({ clist: () => new Response("boom", { status: 500 }), codeforces: () => cfResponse(start) });
@@ -98,7 +98,7 @@ describe("ensureSnapshot: Codeforces fallback", () => {
 describe("ensureSnapshot: total failure", () => {
   it("keeps the previous snapshot and records last_fetch_error", async () => {
     const { fetcher: ok } = mockFetch();
-    await ensureSnapshot(env, NOW - 2 * 60 * MIN, ok);
+    await ensureSnapshot(env, NOW - 2 * SNAPSHOT_TTL_MS, ok);
     const before = await snapshotRow();
 
     const { fetcher } = mockFetch({ clist: () => new Response("x", { status: 502 }) });

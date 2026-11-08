@@ -2,7 +2,8 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { isoUtc } from "../src/core/format.ts";
 import { getMeta } from "../src/meta.ts";
-import { maybeWake } from "../src/wake.ts";
+import { LEASE_MS, MAX_ATTEMPTS } from "../src/reminders.ts";
+import { WAKE_DEBOUNCE_MS, maybeWake } from "../src/wake.ts";
 import { MIN, NOW, jsonResponse, mockFetch, resetDb, seedReminder } from "./helpers.ts";
 
 beforeEach(resetDb);
@@ -61,21 +62,21 @@ describe("maybeWake", () => {
     expect(await getMeta(env.DB, "last_wake_at")).toBeNull();
   });
 
-  it("debounces wakes within 4 minutes", async () => {
+  it("debounces wakes within the debounce interval", async () => {
     await seedReminder({ key: "a" });
-    await setLastWake(NOW - 3 * MIN);
+    await setLastWake(NOW - WAKE_DEBOUNCE_MS + MIN);
     const { fetcher, calls } = mockFetch();
     expect(await maybeWake(env, NOW, fetcher)).toEqual({ woke: false });
     expect(calls.github).toHaveLength(0);
-    expect(await maybeWake(env, NOW + 1 * MIN, fetcher)).toEqual({ woke: true });
+    expect(await maybeWake(env, NOW + MIN, fetcher)).toEqual({ woke: true });
     expect(calls.github).toHaveLength(1);
   });
 
   it("wakes for a claimed reminder whose lease expired but not for one in flight", async () => {
-    await seedReminder({ key: "inflight", status: "claimed", attempts: 1, claim_id: "c", claimed_at: isoUtc(NOW - 2 * MIN) });
+    await seedReminder({ key: "inflight", status: "claimed", attempts: 1, claim_id: "c", claimed_at: isoUtc(NOW - LEASE_MS / 2) });
     const { fetcher, calls } = mockFetch();
     expect(await maybeWake(env, NOW, fetcher)).toEqual({ woke: false });
-    await seedReminder({ key: "stale", status: "claimed", attempts: 1, claim_id: "c", claimed_at: isoUtc(NOW - 11 * MIN) });
+    await seedReminder({ key: "stale", status: "claimed", attempts: 1, claim_id: "c", claimed_at: isoUtc(NOW - LEASE_MS - MIN) });
     expect(await maybeWake(env, NOW, fetcher)).toEqual({ woke: true });
     expect(calls.github).toHaveLength(1);
   });
@@ -85,7 +86,7 @@ describe("maybeWake", () => {
     await seedReminder({ key: "f", status: "failed" });
     await seedReminder({ key: "e", status: "expired" });
     await seedReminder({ key: "late", deadline_utc: isoUtc(NOW - MIN) });
-    await seedReminder({ key: "worn", status: "claimed", attempts: 3, claim_id: "c", claimed_at: isoUtc(NOW - 11 * MIN) });
+    await seedReminder({ key: "worn", status: "claimed", attempts: MAX_ATTEMPTS, claim_id: "c", claimed_at: isoUtc(NOW - LEASE_MS - MIN) });
     const { fetcher, calls } = mockFetch();
     expect(await maybeWake(env, NOW, fetcher)).toEqual({ woke: false });
     expect(calls.github).toHaveLength(0);

@@ -1,7 +1,8 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { isoUtc } from "../src/core/format.ts";
-import { MIN, NOW, STARTERS_264_KEY, getReminder, mockFetch, resetDb, seedReminder } from "./helpers.ts";
+import { LEASE_MS, MAX_ATTEMPTS } from "../src/reminders.ts";
+import { NOW, TARGET_KEY, getReminder, mockFetch, resetDb, seedReminder } from "./helpers.ts";
 
 beforeEach(async () => {
   await resetDb();
@@ -28,47 +29,48 @@ it("tick -> claim -> failed ack -> reclaim -> sent ack, with a lost sender in be
   const first = (await (await api("POST", "/outbox/claim", env.SENDER_TOKEN, { claimId: "run-1" })).json()) as {
     items: { key: string }[];
   };
-  expect(first.items.map((i) => i.key)).toEqual([STARTERS_264_KEY]);
+  expect(first.items.map((i) => i.key)).toEqual([TARGET_KEY]);
 
-  vi.setSystemTime(NOW + 11 * MIN);
+  vi.setSystemTime(NOW + LEASE_MS);
   const second = (await (await api("POST", "/outbox/claim", env.SENDER_TOKEN, { claimId: "run-2" })).json()) as {
     items: { key: string }[];
   };
   expect(second.items).toHaveLength(1);
-  expect(await getReminder(STARTERS_264_KEY)).toMatchObject({ claim_id: "run-2", attempts: 2 });
+  expect(await getReminder(TARGET_KEY)).toMatchObject({ claim_id: "run-2", attempts: 2 });
 
   const stale = await api("POST", "/outbox/ack", env.SENDER_TOKEN, {
     claimId: "run-1",
-    results: [{ key: STARTERS_264_KEY, status: "sent", messageId: "late" }],
+    results: [{ key: TARGET_KEY, status: "sent", messageId: "late" }],
   });
   expect(await stale.json()).toEqual({ applied: 0 });
 
   const fresh = await api("POST", "/outbox/ack", env.SENDER_TOKEN, {
     claimId: "run-2",
-    results: [{ key: STARTERS_264_KEY, status: "sent", messageId: "WAMID.OK" }],
+    results: [{ key: TARGET_KEY, status: "sent", messageId: "WAMID.OK" }],
   });
   expect(await fresh.json()).toEqual({ applied: 1 });
 
   const health = await (await exports.default.fetch("https://w.test/health")).json();
   expect(health).toMatchObject({ queued: 0, claimed: 0 });
-  expect(await getReminder(STARTERS_264_KEY)).toMatchObject({ status: "sent", message_id: "WAMID.OK" });
+  expect(await getReminder(TARGET_KEY)).toMatchObject({ status: "sent", message_id: "WAMID.OK" });
 });
 
-it("a reminder whose sender never acks ends failed after three attempts", async () => {
-  await seedReminder({ key: "unacked", start_utc: isoUtc(NOW + 120 * MIN), deadline_utc: isoUtc(NOW + 110 * MIN) });
-  for (const attempt of [1, 2, 3]) {
-    vi.setSystemTime(NOW + (attempt - 1) * 11 * MIN);
+it("a reminder whose sender never acks ends failed after the last attempt", async () => {
+  const deadline = NOW + (MAX_ATTEMPTS + 2) * LEASE_MS;
+  await seedReminder({ key: "unacked", start_utc: isoUtc(deadline + LEASE_MS), deadline_utc: isoUtc(deadline) });
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    vi.setSystemTime(NOW + (attempt - 1) * LEASE_MS);
     const res = (await (await api("POST", "/outbox/claim", env.SENDER_TOKEN, { claimId: `run-${attempt}` })).json()) as {
       items: unknown[];
     };
     expect(res.items).toHaveLength(1);
   }
-  vi.setSystemTime(NOW + 33 * MIN);
-  const none = (await (await api("POST", "/outbox/claim", env.SENDER_TOKEN, { claimId: "run-4" })).json()) as {
+  vi.setSystemTime(NOW + MAX_ATTEMPTS * LEASE_MS);
+  const none = (await (await api("POST", "/outbox/claim", env.SENDER_TOKEN, { claimId: "run-last" })).json()) as {
     items: unknown[];
   };
   expect(none.items).toEqual([]);
-  expect(await getReminder("unacked")).toMatchObject({ status: "failed", attempts: 3 });
+  expect(await getReminder("unacked")).toMatchObject({ status: "failed", attempts: MAX_ATTEMPTS });
   const health = await (await exports.default.fetch("https://w.test/health")).json();
   expect(health).toMatchObject({ failed24h: 1, queued: 0, claimed: 0 });
 });

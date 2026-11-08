@@ -1,8 +1,12 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CACHE_CONTROL, DOWN_AFTER_MS } from "../src/badge.ts";
 import { isoUtc } from "../src/core/format.ts";
 import { setMeta } from "../src/meta.ts";
 import { MIN, NOW, resetDb, seedReminder } from "./helpers.ts";
+
+const DOWN_MINUTES = DOWN_AFTER_MS / MIN;
+const RECENT_MINUTES = Math.max(1, Math.floor(DOWN_MINUTES / 5));
 
 beforeEach(async () => {
   await resetDb();
@@ -20,35 +24,35 @@ const tickedMinutesAgo = (minutes: number) => meta("last_tick_at", isoUtc(NOW - 
 
 describe("GET /badge", () => {
   it("is public and returns a cacheable shields.io endpoint document", async () => {
-    await tickedMinutesAgo(3);
+    await tickedMinutesAgo(RECENT_MINUTES);
     const res = await badge();
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toMatch(/^application\/json/);
-    expect(res.headers.get("Cache-Control")).toBe("max-age=300");
-    expect(await res.json()).toEqual({ schemaVersion: 1, label: "bot", message: "ok · tick 3m ago", color: "brightgreen" });
+    expect(res.headers.get("Cache-Control")).toBe(CACHE_CONTROL);
+    expect(await res.json()).toEqual({ schemaVersion: 1, label: "bot", message: `ok · tick ${RECENT_MINUTES}m ago`, color: "brightgreen" });
   });
 
   it("is down when the scheduler never ticked", async () => {
     expect(await badgeBody()).toMatchObject({ message: "never ticked", color: "red" });
   });
 
-  it("is down when the last tick is more than 15 minutes old", async () => {
-    await tickedMinutesAgo(23);
-    expect(await badgeBody()).toMatchObject({ message: "no tick for 23m", color: "red" });
+  it("is down when the last tick is older than the down threshold", async () => {
+    await tickedMinutesAgo(DOWN_MINUTES + 8);
+    expect(await badgeBody()).toMatchObject({ message: `no tick for ${DOWN_MINUTES + 8}m`, color: "red" });
   });
 
-  it("is not down when the last tick is exactly 15 minutes old", async () => {
-    await tickedMinutesAgo(15);
-    expect(await badgeBody()).toMatchObject({ message: "ok · tick 15m ago", color: "brightgreen" });
+  it("is not down when the last tick is exactly at the down threshold", async () => {
+    await tickedMinutesAgo(DOWN_MINUTES);
+    expect(await badgeBody()).toMatchObject({ message: `ok · tick ${DOWN_MINUTES}m ago`, color: "brightgreen" });
   });
 
-  it("is down one second past 15 minutes", async () => {
-    await meta("last_tick_at", isoUtc(NOW - 15 * MIN - 1000));
-    expect(await badgeBody()).toMatchObject({ message: "no tick for 15m", color: "red" });
+  it("is down one second past the down threshold", async () => {
+    await meta("last_tick_at", isoUtc(NOW - DOWN_AFTER_MS - 1000));
+    expect(await badgeBody()).toMatchObject({ message: `no tick for ${DOWN_MINUTES}m`, color: "red" });
   });
 
   it("is failing when reminders failed or expired in the last 24 hours", async () => {
-    await tickedMinutesAgo(3);
+    await tickedMinutesAgo(RECENT_MINUTES);
     await seedReminder({ key: "f", status: "failed", updated_at: isoUtc(NOW - 60 * MIN) });
     await seedReminder({ key: "e", status: "expired", updated_at: isoUtc(NOW - 23 * 60 * MIN) });
     await seedReminder({ key: "old", status: "failed", updated_at: isoUtc(NOW - 25 * 60 * MIN) });
@@ -56,26 +60,26 @@ describe("GET /badge", () => {
   });
 
   it("reports down before failing", async () => {
-    await tickedMinutesAgo(30);
+    await tickedMinutesAgo(2 * DOWN_MINUTES);
     await seedReminder({ key: "f", status: "failed" });
-    expect(await badgeBody()).toMatchObject({ message: "no tick for 30m", color: "red" });
+    expect(await badgeBody()).toMatchObject({ message: `no tick for ${2 * DOWN_MINUTES}m`, color: "red" });
   });
 
   it("is degraded when the last fetch recorded an error", async () => {
-    await tickedMinutesAgo(3);
+    await tickedMinutesAgo(RECENT_MINUTES);
     await meta("last_fetch_error", "clist HTTP 500");
     expect(await badgeBody()).toMatchObject({ message: "degraded: clist", color: "yellow" });
   });
 
   it("reports failing before degraded", async () => {
-    await tickedMinutesAgo(3);
+    await tickedMinutesAgo(RECENT_MINUTES);
     await meta("last_fetch_error", "clist HTTP 500");
     await seedReminder({ key: "e", status: "expired" });
     expect(await badgeBody()).toMatchObject({ message: "1 missed in 24h", color: "red" });
   });
 
   it("exposes only the badge fields, never message text, errors or secrets", async () => {
-    await tickedMinutesAgo(3);
+    await tickedMinutesAgo(RECENT_MINUTES);
     await meta("last_fetch_error", "clist HTTP 500 boom detail");
     await seedReminder({ key: "k", text: "TOP SECRET MESSAGE BODY", href: "https://private.test/contest", status: "failed", last_error: "send detail" });
     const raw = await (await badge()).text();

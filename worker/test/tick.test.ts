@@ -1,17 +1,19 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { rules } from "../src/config.ts";
-import { isoUtc } from "../src/core/format.ts";
+import { baseOverrides, rules, tipRules } from "../src/config.ts";
+import { SNAPSHOT_TTL_MS } from "../src/contests.ts";
+import { formatReminder, isoUtc } from "../src/core/format.ts";
 import { reminderKey } from "../src/core/select.ts";
 import { getMeta } from "../src/meta.ts";
 import { runTick } from "../src/tick.ts";
+import { WAKE_DEBOUNCE_MS } from "../src/wake.ts";
 import {
   MIN,
   NOW,
-  STARTERS_264,
-  STARTERS_264_DEADLINE,
-  STARTERS_264_KEY,
-  STARTERS_264_START,
+  TARGET,
+  TARGET_DEADLINE,
+  TARGET_KEY,
+  TARGET_START,
   fixtureContests,
   getReminder,
   jsonResponse,
@@ -25,39 +27,32 @@ beforeEach(resetDb);
 const count = async (where = "1 = 1") =>
   (await env.DB.prepare(`SELECT COUNT(*) AS n FROM reminders WHERE ${where}`).first<{ n: number }>())!.n;
 
+const targetInFixtures = fixtureContests.find((c) => c.href === TARGET.href)!;
+const onlyContests = (...contests: typeof fixtureContests) => mockFetch({ clist: () => jsonResponse({ objects: contests }) });
+
 describe("runTick: queueing", () => {
   it("queues a due reminder with its rendered text and deadline", async () => {
     const { fetcher } = mockFetch();
     const result = await runTick(env, NOW, fetcher);
 
     expect(result).toMatchObject({ fetched: true, queued: 1 });
-    const row = await getReminder(STARTERS_264_KEY);
+    const row = await getReminder(TARGET_KEY);
     expect(row).toMatchObject({
-      resource_id: 2,
-      href: "https://www.codechef.com/START264",
-      start_utc: isoUtc(STARTERS_264_START),
-      deadline_utc: isoUtc(STARTERS_264_DEADLINE),
+      resource_id: TARGET.resource_id,
+      href: TARGET.href,
+      start_utc: isoUtc(TARGET_START),
+      deadline_utc: isoUtc(TARGET_DEADLINE),
       status: "queued",
       attempts: 0,
       created_at: isoUtc(NOW),
     });
-    expect(row?.text).toBe(
-      [
-        "🚨 Contest Reminder 🚨",
-        "",
-        "📍 Platform: Codechef",
-        "🏆 Contest Name: Starters 264",
-        "🕒 Timing: 8:00 PM",
-        "⏳ Duration: 2 hours",
-        "🔗 Contest Link: https://www.codechef.com/START264",
-      ].join("\n"),
-    );
+    expect(row?.text).toBe(formatReminder(TARGET, tipRules, baseOverrides));
   });
 
   it("queues nothing outside the send window", async () => {
-    const { fetcher } = mockFetch();
+    const { fetcher } = onlyContests(targetInFixtures);
     expect((await runTick(env, NOW - MIN, fetcher)).queued).toBe(0);
-    expect((await runTick(env, STARTERS_264_DEADLINE + 1000, fetcher)).queued).toBe(0);
+    expect((await runTick(env, TARGET_DEADLINE + 1000, fetcher)).queued).toBe(0);
     expect(await count()).toBe(0);
   });
 
@@ -77,18 +72,17 @@ describe("runTick: queueing", () => {
   });
 
   it("does not requeue a reminder that was already sent", async () => {
-    await seedReminder({ key: STARTERS_264_KEY, status: "sent", attempts: 1, text: "original" });
+    await seedReminder({ key: TARGET_KEY, status: "sent", attempts: 1, text: "original" });
     const { fetcher } = mockFetch();
     expect((await runTick(env, NOW, fetcher)).queued).toBe(0);
-    expect(await getReminder(STARTERS_264_KEY)).toMatchObject({ status: "sent", text: "original" });
+    expect(await getReminder(TARGET_KEY)).toMatchObject({ status: "sent", text: "original" });
   });
 
   it("gives a rescheduled contest a new reminder", async () => {
-    const movedStart = STARTERS_264_START + 15 * MIN;
-    const rescheduled = { ...STARTERS_264, start: isoUtc(movedStart).slice(0, 19) };
-    const moved = fixtureContests.map((c) => (c === STARTERS_264 ? rescheduled : c));
-    await seedReminder({ key: STARTERS_264_KEY, status: "sent", attempts: 1 });
-    const { fetcher } = mockFetch({ clist: () => jsonResponse({ objects: moved }) });
+    const movedStart = TARGET_START + 15 * MIN;
+    const rescheduled = { ...targetInFixtures, start: isoUtc(movedStart).slice(0, 19) };
+    await seedReminder({ key: TARGET_KEY, status: "sent", attempts: 1 });
+    const { fetcher } = onlyContests(rescheduled);
     expect((await runTick(env, movedStart - rules.leadMinutes * MIN, fetcher)).queued).toBe(1);
     expect(await count()).toBe(2);
     expect(await getReminder(reminderKey(rescheduled))).toMatchObject({ status: "queued" });
@@ -96,7 +90,7 @@ describe("runTick: queueing", () => {
 
   it("keeps queueing from the previous snapshot when every source fails", async () => {
     const { fetcher: ok } = mockFetch();
-    await runTick(env, NOW - 3 * 60 * MIN, ok);
+    await runTick(env, NOW - 2 * SNAPSHOT_TTL_MS, ok);
     const { fetcher } = mockFetch({ clist: () => new Response("x", { status: 500 }) });
     const result = await runTick(env, NOW, fetcher);
     expect(result).toMatchObject({ fetched: false, queued: 1 });
@@ -105,7 +99,7 @@ describe("runTick: queueing", () => {
 });
 
 describe("runTick: tips", () => {
-  const link = "https://www.codechef.com/START264";
+  const link = TARGET.href;
 
   it("merges D1 tip overrides into the rendered text", async () => {
     await env.DB.prepare("INSERT INTO tip_overrides (href, tip, updated_at) VALUES (?1, 'bring snacks', ?2)")
@@ -113,14 +107,14 @@ describe("runTick: tips", () => {
       .run();
     const { fetcher } = mockFetch();
     await runTick(env, NOW, fetcher);
-    expect((await getReminder(STARTERS_264_KEY))?.text).toMatch(/\n\n📌 Tip: bring snacks$/);
+    expect((await getReminder(TARGET_KEY))?.text).toMatch(/\n\n📌 Tip: bring snacks$/);
   });
 
   it("treats an empty override as suppressing the tip", async () => {
     await env.DB.prepare("INSERT INTO tip_overrides (href, tip, updated_at) VALUES (?1, '', ?2)").bind(link, isoUtc(NOW)).run();
     const { fetcher } = mockFetch();
     await runTick(env, NOW, fetcher);
-    expect((await getReminder(STARTERS_264_KEY))?.text).not.toContain("Tip");
+    expect((await getReminder(TARGET_KEY))?.text).not.toContain("Tip");
   });
 });
 
@@ -141,14 +135,14 @@ describe("runTick: housekeeping and wake", () => {
   it("wakes the workflow once for a new reminder and debounces the next tick", async () => {
     const { fetcher, calls } = mockFetch();
     const first = await runTick(env, NOW, fetcher);
-    const second = await runTick(env, NOW + 2 * MIN, fetcher);
+    const second = await runTick(env, NOW + WAKE_DEBOUNCE_MS - 1000, fetcher);
     expect([first.woke, second.woke]).toEqual([true, false]);
     expect(calls.github).toHaveLength(1);
   });
 
   it("does not wake when nothing is pending", async () => {
     const { fetcher, calls } = mockFetch();
-    const result = await runTick(env, NOW - 30 * MIN, fetcher);
+    const result = await runTick(env, NOW - MIN, fetcher);
     expect(result.woke).toBe(false);
     expect(calls.github).toHaveLength(0);
   });
