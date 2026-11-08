@@ -31,7 +31,9 @@ The tip line and the blank line before it appear only when a tip applies. The fo
 | Contest name, AtCoder | Sponsored names become the contest name, with ASCII or full-width parentheses: `JIJ Programming Contest 2026（AtCoder Beginner Contest 476）` → `AtCoder Beginner Contest 476`. |
 | Timing | Start time in IST on a 12-hour clock, such as `8:05 PM`. Start times without a zone are UTC. |
 | Duration | `H:MM hours`, or `H hours` for whole hours, rounded to the minute. |
-| Link | The contest link; LeetCode links end with `/`. |
+| Link, Codeforces | Always `https://codeforces.com/contests/<id>`, the page that opens before the round starts; a `/contest/<id>` link opens only once the round has begun. |
+| Link, LeetCode | The contest link, ending with `/`. |
+| Link, CodeChef and AtCoder | The contest link as given. |
 
 ## Selection
 
