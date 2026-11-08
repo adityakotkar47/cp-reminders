@@ -1,6 +1,6 @@
 # Formatter and selection rules
 
-`src/format.ts` turns a clist contest into the exact reminder text. `src/select.ts` decides which contests get a reminder and when. Both are pure (no I/O) so the same code runs in Node tests and in the Cloudflare Worker.
+`worker/src/core/format.ts` turns a clist contest into the exact reminder text. `worker/src/core/select.ts` decides which contests get a reminder and when. Both are pure (no I/O); the Worker calls them when it queues a reminder, and the golden tests below cover the same code.
 
 ## Message format
 
@@ -30,7 +30,7 @@ Conventions, all taken from the 34 manual reminders in the community's history:
 
 ## Which contests are posted
 
-Configured in `config/rules.json`:
+Configured in `worker/config/rules.json`:
 
 | Key | Meaning |
 |---|---|
@@ -40,11 +40,11 @@ Configured in `config/rules.json`:
 | `leadMinutes` | Reminder is due this many minutes before the start (75, matching the manual median). |
 | `minLeadMinutes` | Never send when the start is closer than this, e.g. after scheduler downtime. |
 
-A reminder is identified by `resource_id:id:start`. If a contest is rescheduled its start changes, so it gets a fresh reminder instead of being treated as already sent.
+Reminder identity and reschedule handling are described in [architecture.md](architecture.md#key-design-decisions) (decision 3).
 
 ## Tips
 
-Configured in `config/tips.json`. Tips are optional; most reminders have none.
+Configured in `worker/config/tips.json`. Tips are optional; most reminders have none.
 
 - `rules`: checked in order, first match wins. Each may constrain `platform`, `startsBeforeIST` (`"12:00"` = morning contests) and `eventMatches` (regex on the name).
 - `overrides`: contest link → tip text for a single contest. An empty string suppresses the tip for that contest.
@@ -53,13 +53,11 @@ The scheduler also merges one-off tips from its D1 `tip_overrides` table, set wi
 
 ## Tests
 
-`pnpm test` runs `test/format.test.ts` against real clist data in `fixtures/`:
+`pnpm --filter cp-reminders-worker test` runs `worker/test/core/format.test.ts` with the rest of the Worker tests, against real clist data in `worker/test/fixtures/`:
 
-- Golden test: the bot's output is compared with every manual reminder in `fixtures/history.json`. 29 match byte-for-byte. The other 5 are manual mistakes the bot gets right (three contests delayed to 8:15 PM but posted with the old time, one wrong link pasted, one name typo); they are listed in the test as known manual errors.
+- Golden test: the bot's output is compared with every manual reminder in `worker/test/fixtures/history.json`. 29 match byte-for-byte. The other 5 are manual mistakes the bot gets right (three contests delayed to 8:15 PM but posted with the old time, one wrong link pasted, one name typo); they are listed in the test as known manual errors.
 - Every contest that was posted manually is selected by the rules.
 - Noise is dropped (Div. 1 twin, Monday Munch, Placement Prep, Kotlin practice, heuristic contests).
 - Due-window, reschedule-key and tip-override behaviour.
 
-`pnpm typecheck` runs `tsc` in strict mode.
-
-Refreshing fixtures: `pnpm fetch-fixtures` (needs `CLIST_USERNAME` and `CLIST_API_KEY` in `.env`). `fixtures/history.json` was produced by `node scripts/extract-history.mjs <WhatsApp chat export .txt>` and contains only the reminder posts.
+The fixtures are frozen golden data captured on 2026-11-07 and are not refreshed.
