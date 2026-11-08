@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   drain:
+    if: vars.BOT_DEPLOYMENT == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
