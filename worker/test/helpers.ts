@@ -1,13 +1,19 @@
 import { env } from "cloudflare:workers";
-import { type Contest, isoUtc } from "../src/core/format.ts";
+import { rules } from "../src/config.ts";
+import { type Contest, isoUtc, utcMs } from "../src/core/format.ts";
+import { reminderKey } from "../src/core/select.ts";
 import upcoming from "./fixtures/clist-upcoming.json" with { type: "json" };
 import type { Fetcher } from "../src/env.ts";
 
 export const MIN = 60_000;
-export const NOW = Date.parse("2026-11-11T13:45:00Z");
-export const STARTERS_264_KEY = "2|https://www.codechef.com/START264|2026-11-11T14:30:00.000Z";
 
 export const fixtureContests = upcoming.objects as unknown as Contest[];
+
+export const STARTERS_264 = fixtureContests.find((c) => c.event === "Starters 264")!;
+export const STARTERS_264_START = utcMs(STARTERS_264.start);
+export const STARTERS_264_KEY = reminderKey(STARTERS_264);
+export const STARTERS_264_DEADLINE = STARTERS_264_START - rules.minLeadMinutes * MIN;
+export const NOW = STARTERS_264_START - rules.leadMinutes * MIN;
 
 interface Call {
   url: string;

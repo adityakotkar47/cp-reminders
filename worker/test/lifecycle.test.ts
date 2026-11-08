@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { MIN, NOW, STARTERS_264_KEY, getReminder, mockFetch, resetDb } from "./helpers.ts";
+import { isoUtc } from "../src/core/format.ts";
+import { MIN, NOW, STARTERS_264_KEY, getReminder, mockFetch, resetDb, seedReminder } from "./helpers.ts";
 
 beforeEach(async () => {
   await resetDb();
@@ -54,7 +55,7 @@ it("tick -> claim -> failed ack -> reclaim -> sent ack, with a lost sender in be
 });
 
 it("a reminder whose sender never acks ends failed after three attempts", async () => {
-  await api("POST", "/tick", env.TICK_TOKEN);
+  await seedReminder({ key: "unacked", start_utc: isoUtc(NOW + 120 * MIN), deadline_utc: isoUtc(NOW + 110 * MIN) });
   for (const attempt of [1, 2, 3]) {
     vi.setSystemTime(NOW + (attempt - 1) * 11 * MIN);
     const res = (await (await api("POST", "/outbox/claim", env.SENDER_TOKEN, { claimId: `run-${attempt}` })).json()) as {
@@ -67,7 +68,7 @@ it("a reminder whose sender never acks ends failed after three attempts", async 
     items: unknown[];
   };
   expect(none.items).toEqual([]);
-  expect(await getReminder(STARTERS_264_KEY)).toMatchObject({ status: "failed", attempts: 3 });
+  expect(await getReminder("unacked")).toMatchObject({ status: "failed", attempts: 3 });
   const health = await (await exports.default.fetch("https://w.test/health")).json();
   expect(health).toMatchObject({ failed24h: 1, queued: 0, claimed: 0 });
 });

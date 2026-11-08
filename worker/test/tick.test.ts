@@ -1,12 +1,17 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { rules } from "../src/config.ts";
 import { isoUtc } from "../src/core/format.ts";
+import { reminderKey } from "../src/core/select.ts";
 import { getMeta } from "../src/meta.ts";
 import { runTick } from "../src/tick.ts";
 import {
   MIN,
   NOW,
+  STARTERS_264,
+  STARTERS_264_DEADLINE,
   STARTERS_264_KEY,
+  STARTERS_264_START,
   fixtureContests,
   getReminder,
   jsonResponse,
@@ -30,8 +35,8 @@ describe("runTick: queueing", () => {
     expect(row).toMatchObject({
       resource_id: 2,
       href: "https://www.codechef.com/START264",
-      start_utc: "2026-11-11T14:30:00.000Z",
-      deadline_utc: "2026-11-11T14:20:00.000Z",
+      start_utc: isoUtc(STARTERS_264_START),
+      deadline_utc: isoUtc(STARTERS_264_DEADLINE),
       status: "queued",
       attempts: 0,
       created_at: isoUtc(NOW),
@@ -51,15 +56,15 @@ describe("runTick: queueing", () => {
 
   it("queues nothing outside the send window", async () => {
     const { fetcher } = mockFetch();
-    expect((await runTick(env, NOW - 30 * MIN, fetcher)).queued).toBe(0);
-    expect((await runTick(env, Date.parse("2026-11-11T14:25:00Z"), fetcher)).queued).toBe(0);
+    expect((await runTick(env, NOW - MIN, fetcher)).queued).toBe(0);
+    expect((await runTick(env, STARTERS_264_DEADLINE + 1000, fetcher)).queued).toBe(0);
     expect(await count()).toBe(0);
   });
 
   it("is idempotent across ticks", async () => {
     const { fetcher } = mockFetch();
     const first = await runTick(env, NOW, fetcher);
-    const second = await runTick(env, NOW + 5 * MIN, fetcher);
+    const second = await runTick(env, NOW + MIN, fetcher);
     expect([first.queued, second.queued]).toEqual([1, 0]);
     expect(await count()).toBe(1);
   });
@@ -79,14 +84,14 @@ describe("runTick: queueing", () => {
   });
 
   it("gives a rescheduled contest a new reminder", async () => {
-    const moved = fixtureContests.map((c) => (c.href.endsWith("START264") ? { ...c, start: "2026-11-11T14:45:00" } : c));
+    const movedStart = STARTERS_264_START + 15 * MIN;
+    const rescheduled = { ...STARTERS_264, start: isoUtc(movedStart).slice(0, 19) };
+    const moved = fixtureContests.map((c) => (c === STARTERS_264 ? rescheduled : c));
     await seedReminder({ key: STARTERS_264_KEY, status: "sent", attempts: 1 });
     const { fetcher } = mockFetch({ clist: () => jsonResponse({ objects: moved }) });
-    expect((await runTick(env, NOW + 15 * MIN, fetcher)).queued).toBe(1);
+    expect((await runTick(env, movedStart - rules.leadMinutes * MIN, fetcher)).queued).toBe(1);
     expect(await count()).toBe(2);
-    expect(await getReminder("2|https://www.codechef.com/START264|2026-11-11T14:45:00.000Z")).toMatchObject({
-      status: "queued",
-    });
+    expect(await getReminder(reminderKey(rescheduled))).toMatchObject({ status: "queued" });
   });
 
   it("keeps queueing from the previous snapshot when every source fails", async () => {
