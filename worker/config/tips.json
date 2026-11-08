@@ -1,7 +1,57 @@
 {
   "rules": [
-    { "platform": "LeetCode", "startsBeforeIST": "12:00", "text": "morning contests build discipline" },
-    { "platform": "Atcoder", "eventMatches": "Beginner Contest", "text": "Best CP platform, so highly recommended." }
+    {
+      "platform": "Codeforces",
+      "eventMatches": "Div\\. 4",
+      "texts": [
+        "never started cp? scared of cf?",
+        "beginner friendly contest, do not miss this",
+        "every red coder once started with a round like this",
+        "no pressure, solve A and B and you're already in",
+        "div 4 is the friendliest round on cf, bring a friend along"
+      ]
+    },
+    {
+      "platform": "Codeforces",
+      "eventMatches": "Div\\. 3",
+      "texts": [
+        "never miss a div 3",
+        "Div 3s are easier, do not miss.",
+        "div 3 is the best place to climb, just show up",
+        "solve one more problem than last time, that's the whole goal",
+        "read all problems first, the easy one isn't always A"
+      ]
+    },
+    {
+      "platform": "Codeforces",
+      "eventMatches": "^Educational",
+      "texts": [
+        "edu rounds are like leg days, you shouldn't skip them",
+        "edu rounds teach more than they rate, show up",
+        "read the editorial after, that's where edu rounds pay off",
+        "stick around for the hacking phase, reading others' code is free learning"
+      ]
+    },
+    {
+      "platform": "Atcoder",
+      "eventMatches": "Beginner Contest",
+      "texts": [
+        "Best CP platform, so highly recommended for beginners and everyone.",
+        "highly recommended for all",
+        "ABC problems are the cleanest way to learn new ideas, don't skip",
+        "aim for D today, upsolve E after",
+        "one ABC every week and you'll see the difference in a month"
+      ]
+    },
+    {
+      "platform": "LeetCode",
+      "startsBeforeIST": "12:00",
+      "texts": [
+        "morning contests build discipline",
+        "wake up, code, then chai",
+        "4 problems before breakfast, best way to start a sunday"
+      ]
+    }
   ],
   "overrides": {}
 }

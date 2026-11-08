@@ -10,7 +10,7 @@ export interface Tip {
   platform?: string;
   startsBeforeIST?: string;
   eventMatches?: string;
-  text: string;
+  texts: string[];
 }
 
 export type TipOverrides = Record<string, string>;
@@ -90,6 +90,12 @@ function displayLink(c: Contest): string {
   }
 }
 
+function fnv1a(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
+  return h >>> 0;
+}
+
 function pickTip(c: Contest, tips: readonly Tip[], overrides: TipOverrides = {}): string | undefined {
   for (const key of [c.href, displayLink(c)]) {
     if (Object.hasOwn(overrides, key)) return overrides[key] || undefined;
@@ -102,7 +108,7 @@ function pickTip(c: Contest, tips: readonly Tip[], overrides: TipOverrides = {})
       (!t.startsBeforeIST || h * 60 + m < hhmmToMinutes(t.startsBeforeIST)) &&
       (!t.eventMatches || new RegExp(t.eventMatches, "i").test(c.event)),
   );
-  return tip?.text;
+  return tip?.texts.length ? tip.texts[fnv1a(c.href) % tip.texts.length] : undefined;
 }
 
 export function formatReminder(c: Contest, tips: readonly Tip[] = [], overrides: TipOverrides = {}): string {

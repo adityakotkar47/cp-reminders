@@ -2,16 +2,26 @@ import { describe, expect, test } from "vitest";
 import { baseOverrides, rules, tipRules } from "../../src/config.ts";
 import { type Contest, type Tip, formatDuration, formatReminder, formatTime } from "../../src/core/format.ts";
 import { type Rules, dueReminders, reminderKey, selectContests } from "../../src/core/select.ts";
-import clistPast from "../fixtures/clist-past.json" with { type: "json" };
+import clistHistory from "../fixtures/clist-history.json" with { type: "json" };
 import clistUpcoming from "../fixtures/clist-upcoming.json" with { type: "json" };
 import history from "../fixtures/history.json" with { type: "json" };
 
-const past = clistPast.objects as unknown as Contest[];
+const past = clistHistory.objects as unknown as Contest[];
 const upcoming = clistUpcoming.objects as unknown as Contest[];
-const all = [...past, ...upcoming];
-const norm = (u: string) => u.replace(/\/+$/, "").toLowerCase();
-const linkOf = (text: string) => text.match(/Contest Link: (\S+)/)![1]!;
+const all = [...new Map([...past, ...upcoming].map((c) => [c.href, c])).values()];
+const norm = (u: string) =>
+  u.trim().toLowerCase().replace(/\/+$/, "").replace("codeforces.com/contest/", "codeforces.com/contests/");
 const byEvent = (event: string) => all.find((c) => c.event === event)!;
+
+const FIELDS = ["Platform", "Contest Name", "Timing", "Duration", "Contest Link"] as const;
+const field = (text: string, name: string) => text.match(new RegExp(`${name}:\\s*(.+)`))?.[1]?.trim();
+const canon = (name: string, value: string | undefined) =>
+  name === "Duration" ? value?.replace(/^(\d+):00 hours$/, "$1 hours") : value;
+const PLATFORMS = new Set(["codeforces", "codechef", "leetcode", "atcoder"]);
+const posts = history
+  .map((h) => ({ date: h.postedIST.slice(0, 10), text: h.text, link: field(h.text, "Contest Link") }))
+  .filter((p) => p.link && PLATFORMS.has(field(p.text, "Platform")?.toLowerCase() ?? ""));
+const postKey = (p: { date: string; link?: string }) => `${p.date} ${p.link}`;
 
 const TEST_RULES: Rules = {
   include: {
@@ -26,35 +36,90 @@ const TEST_RULES: Rules = {
   minLeadMinutes: 15,
 };
 
-describe("golden: the configured rules and tips reproduce the community's manual reminders", () => {
-  test("bot output matches every manual reminder except the known manual mistakes", () => {
-    const byLink = new Map(selectContests(all, rules).map((c) => [norm(c.href), c]));
-    const canon = (s: string) => s.replace(/Duration: (\d+):00 hours/, "Duration: $1 hours");
-    const knownManualErrors: Record<string, string> = {
-      "2026-09-23 https://www.codechef.com/START257": "started 8:15 PM, posted as 8:00 PM",
-      "2026-10-07 https://codeforces.com/contests/2275": "started 8:15 PM, posted as 8:05 PM",
-      "2026-11-04 https://codeforces.com/contests/2283": "started 8:15 PM, posted as 8:05 PM",
-      "2026-10-10 https://codeforces.com/contests/2272": "pasted Round 1130's link for Round 1126",
-      "2026-10-17 https://codeforces.com/contests/2261": "typo in contest name",
-    };
+const NOT_SELECTED: Record<string, string> = {
+  "2025-11-03 https://codeforces.com/contests/2168": "Testing Round 20 is unrated; unrated rounds are skipped",
+  "2026-04-01 https://codeforces.com/contests/2214": "April Fools Day Contest is unrated; unrated rounds are skipped",
+  "2025-12-03 https://www.codechef.com/START215C": "division link; clist lists the contest as START215",
+  "2026-03-14 https://codeforces.com/contests/220": "link missing a digit",
+};
+
+const MANUAL_SLIPS: Record<string, string> = {
+  "2025-08-20 https://www.codechef.com/START200": "2 hours posted for a 3-hour contest",
+  "2025-08-21 https://codeforces.com/contest/2132": "singular /contest/ link",
+  "2025-08-24 https://codeforces.com/contest/2133": "singular /contest/ link",
+  "2025-08-26 https://codeforces.com/contest/2134": "singular /contest/ link",
+  "2025-09-15 https://codeforces.com/contests/2144": "name shortened to (Div 2)",
+  "2025-09-17 https://www.codechef.com/START200": "Starters 204 posted with Starters 200's link",
+  "2025-09-21 https://codeforces.com/contests/2146": "duration written as 2.15 Hours",
+  "2025-09-24 https://codeforces.com/contests/2151": "3 hours posted for a 3:15 round",
+  "2025-10-05 https://codeforces.com/contests/2155": "duration written as 2.00 Hours",
+  "2025-10-10 https://codeforces.com/contests/2153": "2.00 Hours posted for a 2:15 round",
+  "2025-11-06 https://codeforces.com/contests/2164": "duration written as 03:00",
+  "2025-11-16 https://codeforces.com/contests/2166": "simultaneous Div. 1 and Div. 2 posted as Div. 2",
+  "2025-11-26 https://www.codechef.com/START214": "started at 8:15 PM, posted as 8:00 PM",
+  "2025-12-23 https://codeforces.com/contests/2179": "started at 8:15 PM, posted as 8:05 PM",
+  "2026-01-12 https://codeforces.com/contests/2184": "Div. 3 round posted as Div. 2",
+  "2026-01-17 https://codeforces.com/contests/2191": "written as (Div. 1 + 2)",
+  "2026-02-15 https://codeforces.com/contests/2195": "double space in the name; started at 8:15 PM, posted as 8:05 PM",
+  "2026-02-25 https://codeforces.com/contests/2203": "Educational Round 187 posted as 186",
+  "2026-02-27 https://codeforces.com/contests/2200": "double space in the name",
+  "2026-03-16 https://codeforces.com/contests/2204": "2 hours posted for a 2:15 round",
+  "2026-03-28 https://codeforces.com/contests/2211": "sponsor name kept; started at 8:15 PM, posted as 8:05 PM",
+  "2026-04-13 https://codeforces.com/contests/2220": "simultaneous Div. 1 and Div. 2 posted as Div. 2",
+  "2026-05-13 https://www.codechef.com/START238": "2 hours posted for a 2:30 contest",
+  "2026-05-23 https://codeforces.com/contests/2229": "sponsor name kept",
+  "2026-06-18 https://codeforces.com/contests/2237": "sponsor name kept",
+  "2026-07-16 https://codeforces.com/contests/2245": "sponsor name kept; started at 8:15 PM, posted as 8:05 PM; 2:15 posted for 2:30",
+  "2026-07-29 https://www.codechef.com/START249": "2 hours posted for a 2:30 contest",
+  "2026-09-23 https://www.codechef.com/START257": "started at 8:15 PM, posted as 8:00 PM",
+  "2026-10-07 https://codeforces.com/contests/2275": "started at 8:15 PM, posted as 8:05 PM",
+  "2026-10-10 https://codeforces.com/contests/2272": "Round 1130's link posted for Round 1126",
+  "2026-10-17 https://codeforces.com/contests/2261": "typo in the contest name",
+  "2026-11-04 https://codeforces.com/contests/2283": "started at 8:15 PM, posted as 8:05 PM",
+};
+
+describe("golden: the configured rules reproduce the community's manual reminders, August 2025 to November 2026", () => {
+  const byLink = new Map(selectContests(all, rules).map((c) => [norm(c.href), c]));
+
+  test("every manually posted contest is selected, except the listed ones", () => {
+    const missed = posts.filter((p) => !Object.hasOwn(NOT_SELECTED, postKey(p)) && !byLink.has(norm(p.link!))).map(postKey);
+    expect(missed).toEqual([]);
+  });
+
+  test("platform, name, timing, duration and link equal every manual reminder, except listed slips", () => {
     const diffs: string[] = [];
-    let compared = 0;
-    for (const h of history) {
-      if (Object.hasOwn(knownManualErrors, `${h.postedIST.slice(0, 10)} ${linkOf(h.text)}`)) continue;
-      compared++;
-      const c = byLink.get(norm(linkOf(h.text)));
-      const got = c ? formatReminder(c, tipRules, baseOverrides) : "(not selected)";
-      if (got !== canon(h.text)) diffs.push(`--- manual\n${h.text}\n+++ bot\n${got}`);
+    for (const p of posts) {
+      const c = byLink.get(norm(p.link!));
+      if (!c || Object.hasOwn(MANUAL_SLIPS, postKey(p))) continue;
+      const bot = formatReminder(c);
+      for (const name of FIELDS) {
+        const manual = canon(name, field(p.text, name));
+        const ours = canon(name, field(bot, name));
+        if (manual !== ours) diffs.push(`${postKey(p)} ${name}: manual "${manual}" | bot "${ours}"`);
+      }
     }
-    expect(compared).toBe(history.length - Object.keys(knownManualErrors).length);
     expect(diffs).toEqual([]);
   });
 
-  test("every manually posted contest is selected", () => {
-    const selected = new Set(selectContests(all, rules).map((c) => norm(c.href)));
-    const missed = history.map((h) => linkOf(h.text)).filter((l) => !selected.has(norm(l)));
-    expect(missed).toEqual([]);
+  test("every listed post exists, and the listed slips really differ from the bot", () => {
+    const keys = new Set(posts.map(postKey));
+    expect([...Object.keys(NOT_SELECTED), ...Object.keys(MANUAL_SLIPS)].filter((k) => !keys.has(k))).toEqual([]);
+    const identical = posts
+      .filter((p) => Object.hasOwn(MANUAL_SLIPS, postKey(p)))
+      .filter((p) => {
+        const bot = formatReminder(byLink.get(norm(p.link!))!);
+        return FIELDS.every((name) => canon(name, field(p.text, name)) === canon(name, field(bot, name)));
+      })
+      .map(postKey);
+    expect(identical).toEqual([]);
   });
+});
+
+test("template: the bot's text equals the community's latest post for the same contest, apart from the tip", () => {
+  const latest = history.at(-1)!;
+  const contest = selectContests(all, rules).find((c) => norm(c.href) === norm(field(latest.text, "Contest Link")!))!;
+  const withoutTip = (s: string) => s.replace(/\n\n📌 Tip: .*$/, "");
+  expect(withoutTip(formatReminder(contest, tipRules, baseOverrides))).toBe(withoutTip(latest.text));
 });
 
 test("time and duration helpers", () => {
@@ -162,9 +227,25 @@ describe("tips", () => {
   const evening = byEvent("Biweekly Contest 195");
   const abc = byEvent("AtCoder Beginner Contest 484");
   const tips: Tip[] = [
-    { platform: "LeetCode", startsBeforeIST: "12:00", text: "early" },
-    { platform: "Atcoder", eventMatches: "Beginner", text: "beginner" },
+    { platform: "LeetCode", startsBeforeIST: "12:00", texts: ["early"] },
+    { platform: "Atcoder", eventMatches: "Beginner", texts: ["beginner"] },
   ];
+  const pool = ["one", "two", "three", "four"];
+  const pooled: Tip[] = [{ platform: "Atcoder", eventMatches: "Beginner", texts: pool }];
+  const tipOf = (c: Contest) => formatReminder(c, pooled).match(/📌 Tip: (.*)$/)?.[1];
+  const beginnerContests = all.filter((c) => c.resource_id === 93 && /Beginner Contest/.test(c.event));
+
+  test("a pooled rule gives each contest one line from its pool, always the same for that contest", () => {
+    for (const c of beginnerContests) {
+      expect(pool).toContain(tipOf(c));
+      expect(tipOf({ ...c })).toBe(tipOf(c));
+    }
+  });
+
+  test("a pooled rule spreads its lines across contests", () => {
+    expect(beginnerContests.length).toBeGreaterThanOrEqual(pool.length);
+    expect(new Set(beginnerContests.map(tipOf)).size).toBeGreaterThan(1);
+  });
 
   test("the first matching rule applies; a contest matching none gets no tip", () => {
     expect(formatReminder(morning, tips)).toMatch(/\n\n📌 Tip: early$/);
