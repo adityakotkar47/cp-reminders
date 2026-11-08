@@ -240,8 +240,6 @@ If short-lived sessions on GitHub-hosted runners prove unreliable, the sender ru
 
 ## References
 
-Verified 2026-11-07 and 2026-11-08.
-
 1. Cloudflare Workers limits: https://developers.cloudflare.com/workers/platform/limits/
 2. D1 pricing and limits: https://developers.cloudflare.com/d1/platform/pricing/, https://developers.cloudflare.com/d1/platform/limits/
 3. GitHub Actions concurrency: https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/control-the-concurrency-of-workflows-and-jobs
