@@ -44,7 +44,7 @@ Only community admins can post in Announcements ([Z-API communities](https://dev
 - The data includes simultaneous Codeforces Div. 1 and Div. 2 rounds, placeholder names such as "Codeforces Round (Div. 2)", and week-long events such as "Kotlin Heroes: Practice", so selection rules are needed.
 - clist's terms allow free use for personal, educational and community projects, ask for caching, for the key to stay out of public repositories and for attribution in public projects, and disclaim liability for missed contests ([clist terms](https://clist.by/terms/)).
 
-The platforms' own endpoints answer without a key and serve as fallbacks: Codeforces `contest.list` (Unix UTC), LeetCode's `upcomingContests` GraphQL query (Unix UTC), CodeChef `/api/list/contests/all` (`+05:30` times) and AtCoder's contests page (HTML, JST). The LeetCode and CodeChef endpoints are undocumented. kontests.net is no longer available ([API Bouncer](https://www.apibouncer.com/apis/844/kontests)).
+The platforms' own endpoints answer without a key and serve as fallbacks: Codeforces `contest.list` (Unix UTC), LeetCode's `upcomingContests` GraphQL query (Unix UTC), CodeChef `/api/list/contests/all` (`+05:30` times) and AtCoder's contests page (HTML, JST). The LeetCode and CodeChef endpoints are undocumented. kontests.net does not respond ([API Bouncer](https://www.apibouncer.com/apis/844/kontests)).
 
 ## Hosting: Cloudflare schedules, GitHub Actions sends
 
