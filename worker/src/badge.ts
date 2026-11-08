@@ -18,6 +18,7 @@ function status(health: Health, nowMs: number): Pick<Badge, "message" | "color">
   const sinceTick = nowMs - Date.parse(health.lastTickAt);
   const minutes = Math.floor(sinceTick / MIN_MS);
   if (sinceTick > DOWN_AFTER_MS) return { message: `no tick for ${minutes}m`, color: "red" };
+  if (health.lastWakeError !== null) return { message: "dispatch failing", color: "red" };
   const missed = health.failed24h + health.expired24h;
   if (missed > 0) return { message: `${missed} missed in 24h`, color: "red" };
   if (health.lastFetchError !== null) return { message: "degraded: clist", color: "yellow" };

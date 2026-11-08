@@ -25,6 +25,7 @@ describe("GET /health", () => {
       lastFetchAt: null,
       lastFetchSource: null,
       lastFetchError: null,
+      lastWakeError: null,
       queued: 0,
       claimed: 0,
       failed24h: 0,
@@ -55,11 +56,19 @@ describe("GET /health", () => {
     });
   });
 
+  it("reports a failed dispatch to the sender", async () => {
+    await seedReminder({ key: "q" });
+    const mock = mockFetch({ github: () => new Response("Bad credentials", { status: 401 }) });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => mock.fetcher(String(input), init));
+    await exports.default.fetch("https://w.test/tick", { method: "POST", headers: { Authorization: `Bearer ${env.TICK_TOKEN}` } });
+    expect(await (await health()).json()).toMatchObject({ lastWakeError: expect.stringContaining("401") });
+  });
+
   it("exposes only the documented counters, never message text, links or secrets", async () => {
     await seedReminder({ key: "k", text: "TOP SECRET MESSAGE BODY", href: "https://private.test/contest", status: "failed", last_error: "boom detail" });
     const raw = await (await health()).text();
     expect(Object.keys(JSON.parse(raw)).sort()).toEqual(
-      ["claimed", "expired24h", "failed24h", "lastFetchAt", "lastFetchError", "lastFetchSource", "lastTickAt", "queued"],
+      ["claimed", "expired24h", "failed24h", "lastFetchAt", "lastFetchError", "lastFetchSource", "lastTickAt", "lastWakeError", "queued"],
     );
     for (const leaked of ["TOP SECRET", "private.test", "boom detail", env.TICK_TOKEN, env.SENDER_TOKEN, env.ADMIN_TOKEN, env.GH_TOKEN, env.CLIST_API_KEY]) {
       expect(raw).not.toContain(leaked);

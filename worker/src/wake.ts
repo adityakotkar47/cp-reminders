@@ -1,7 +1,7 @@
 import { isoUtc } from "./core/format.ts";
 import type { Fetcher } from "./env.ts";
 import { errorMessage } from "./errors.ts";
-import { getMeta, setMeta } from "./meta.ts";
+import { deleteMeta, getMeta, setMeta } from "./meta.ts";
 import { hasPendingReminders } from "./reminders.ts";
 
 export interface WakeResult {
@@ -28,15 +28,21 @@ async function dispatch(env: Env, fetcher: Fetcher): Promise<void> {
   if (!res.ok) throw new Error(`workflow dispatch HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
 }
 
-export async function maybeWake(env: Env, nowMs: number, fetcher: Fetcher): Promise<WakeResult> {
-  if (!(await hasPendingReminders(env, nowMs))) return { woke: false };
+async function shouldWake(env: Env, nowMs: number): Promise<boolean> {
+  if (!(await hasPendingReminders(env, nowMs))) return false;
   const last = await getMeta(env.DB, "last_wake_at");
-  if (last !== null && nowMs - Date.parse(last) < WAKE_DEBOUNCE_MS) return { woke: false };
+  return last === null || nowMs - Date.parse(last) >= WAKE_DEBOUNCE_MS;
+}
+
+export async function maybeWake(env: Env, nowMs: number, fetcher: Fetcher): Promise<WakeResult> {
+  if (!(await shouldWake(env, nowMs))) return { woke: false };
   try {
     await dispatch(env, fetcher);
   } catch (e) {
-    return { woke: false, error: errorMessage(e) };
+    const error = errorMessage(e);
+    await setMeta(env.DB, "last_wake_error", error).run();
+    return { woke: false, error };
   }
-  await setMeta(env.DB, "last_wake_at", isoUtc(nowMs)).run();
+  await env.DB.batch([setMeta(env.DB, "last_wake_at", isoUtc(nowMs)), deleteMeta(env.DB, "last_wake_error")]);
   return { woke: true };
 }

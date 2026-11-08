@@ -51,6 +51,7 @@ describe("maybeWake", () => {
     expect(result.woke).toBe(false);
     expect(result.error).toContain(String(status));
     expect(await getMeta(env.DB, "last_wake_at")).toBeNull();
+    expect(await getMeta(env.DB, "last_wake_error")).toBe(result.error);
   });
 
   it("does not record last_wake_at when the request itself throws", async () => {
@@ -60,6 +61,21 @@ describe("maybeWake", () => {
     });
     expect(result).toEqual({ woke: false, error: "network down" });
     expect(await getMeta(env.DB, "last_wake_at")).toBeNull();
+    expect(await getMeta(env.DB, "last_wake_error")).toBe("network down");
+  });
+
+  it("keeps the dispatch error until a dispatch succeeds", async () => {
+    await seedReminder({ key: "a" });
+    const failing = mockFetch({ github: () => new Response("Bad credentials", { status: 401 }) });
+    await maybeWake(env, NOW, failing.fetcher);
+
+    await env.DB.prepare("DELETE FROM reminders").run();
+    expect(await maybeWake(env, NOW + MIN, mockFetch().fetcher)).toEqual({ woke: false });
+    expect(await getMeta(env.DB, "last_wake_error")).toContain("401");
+
+    await seedReminder({ key: "b" });
+    expect(await maybeWake(env, NOW + 2 * MIN, mockFetch().fetcher)).toEqual({ woke: true });
+    expect(await getMeta(env.DB, "last_wake_error")).toBeNull();
   });
 
   it("debounces wakes within the debounce interval", async () => {

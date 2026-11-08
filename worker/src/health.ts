@@ -10,6 +10,7 @@ export interface Health {
   lastFetchAt: string | null;
   lastFetchSource: string | null;
   lastFetchError: string | null;
+  lastWakeError: string | null;
   queued: number;
   claimed: number;
   failed24h: number;
@@ -43,6 +44,7 @@ export async function readHealth(db: D1Database, nowMs: number): Promise<Health>
     lastFetchAt: meta.get("last_fetch_at") ?? null,
     lastFetchSource: meta.get("last_fetch_source") ?? null,
     lastFetchError: meta.get("last_fetch_error") ?? null,
+    lastWakeError: meta.get("last_wake_error") ?? null,
     queued: counts?.queued ?? 0,
     claimed: counts?.claimed ?? 0,
     failed24h: counts?.failed24h ?? 0,

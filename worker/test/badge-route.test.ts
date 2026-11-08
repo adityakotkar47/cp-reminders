@@ -65,6 +65,25 @@ describe("GET /badge", () => {
     expect(await badgeBody()).toMatchObject({ message: `no tick for ${2 * DOWN_MINUTES}m`, color: "red" });
   });
 
+  it("is failing when the last dispatch to the sender failed", async () => {
+    await tickedMinutesAgo(RECENT_MINUTES);
+    await meta("last_wake_error", "workflow dispatch HTTP 401: Bad credentials");
+    expect(await badgeBody()).toMatchObject({ message: "dispatch failing", color: "red" });
+  });
+
+  it("reports down before dispatch failing", async () => {
+    await tickedMinutesAgo(2 * DOWN_MINUTES);
+    await meta("last_wake_error", "workflow dispatch HTTP 401");
+    expect(await badgeBody()).toMatchObject({ message: `no tick for ${2 * DOWN_MINUTES}m`, color: "red" });
+  });
+
+  it("reports dispatch failing before missed reminders", async () => {
+    await tickedMinutesAgo(RECENT_MINUTES);
+    await meta("last_wake_error", "workflow dispatch HTTP 401");
+    await seedReminder({ key: "e", status: "expired" });
+    expect(await badgeBody()).toMatchObject({ message: "dispatch failing", color: "red" });
+  });
+
   it("is degraded when the last fetch recorded an error", async () => {
     await tickedMinutesAgo(RECENT_MINUTES);
     await meta("last_fetch_error", "clist HTTP 500");
@@ -81,10 +100,11 @@ describe("GET /badge", () => {
   it("exposes only the badge fields, never message text, errors or secrets", async () => {
     await tickedMinutesAgo(RECENT_MINUTES);
     await meta("last_fetch_error", "clist HTTP 500 boom detail");
+    await meta("last_wake_error", "dispatch wake detail");
     await seedReminder({ key: "k", text: "TOP SECRET MESSAGE BODY", href: "https://private.test/contest", status: "failed", last_error: "send detail" });
     const raw = await (await badge()).text();
     expect(Object.keys(JSON.parse(raw)).sort()).toEqual(["color", "label", "message", "schemaVersion"]);
-    for (const leaked of ["TOP SECRET", "private.test", "boom detail", "send detail", env.TICK_TOKEN, env.SENDER_TOKEN, env.ADMIN_TOKEN, env.GH_TOKEN, env.CLIST_API_KEY]) {
+    for (const leaked of ["TOP SECRET", "private.test", "boom detail", "wake detail", "send detail", env.TICK_TOKEN, env.SENDER_TOKEN, env.ADMIN_TOKEN, env.GH_TOKEN, env.CLIST_API_KEY]) {
       expect(raw).not.toContain(leaked);
     }
   });
