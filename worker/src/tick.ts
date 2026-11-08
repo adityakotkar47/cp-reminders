@@ -42,14 +42,7 @@ export async function runTick(env: Env, nowMs: number, fetcher: Fetcher): Promis
 
   const due = dueReminders(snapshot.contests, rules, nowMs);
   const overrides = due.length > 0 ? await loadOverrides(env) : {};
-  const inserts: D1PreparedStatement[] = [];
-  for (const c of due) {
-    try {
-      inserts.push(insertStatement(env.DB, c, formatReminder(c, tipRules, overrides), nowMs));
-    } catch (e) {
-      errors.push(`${reminderKey(c)}: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
+  const inserts = due.map((c) => insertStatement(env.DB, c, formatReminder(c, tipRules, overrides), nowMs));
 
   const sweeps = sweepStatements(env.DB, nowMs);
   const outcomes = await env.DB.batch([
