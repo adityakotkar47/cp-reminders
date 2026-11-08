@@ -8,7 +8,7 @@ async function digest(value: string): Promise<Uint8Array> {
 export async function safeEqual(a: string, b: string): Promise<boolean> {
   const [da, db] = await Promise.all([digest(a), digest(b)]);
   let diff = 0;
-  for (let i = 0; i < da.length; i++) diff |= (da[i] ?? 0) ^ (db[i] ?? 0);
+  for (let i = 0; i < da.length; i++) diff |= da[i] ^ db[i];
   return diff === 0;
 }
 
