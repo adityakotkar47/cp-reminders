@@ -42,10 +42,10 @@ The tip line and the blank line before it appear only when a tip applies. The fo
 | `include` | per platform, regular expressions on the contest name | A contest is posted only if its name matches one of its platform's patterns: Codeforces rounds and Global Rounds, CodeChef Starters, LeetCode Weekly and Biweekly contests, AtCoder Beginner Contests. |
 | `maxDurationHours` | `5` | Longer events are skipped, such as Kotlin Heroes practice rounds, heuristic contests and Placement Prep weekends. |
 | `mergeCodeforcesDivs` | `true` | A Div. 1 and a Div. 2 round starting together get one reminder: the Div. 2 link, named `(Div. 1 + Div. 2)`. |
-| `leadMinutes` | `75` | A reminder becomes due 75 minutes before the start. |
+| `leadMinutes` | `45` | A reminder becomes due 45 minutes before the start. |
 | `minLeadMinutes` | `10` | A reminder is not sent once the start is less than 10 minutes away. |
 
-A reminder is therefore sendable from 75 to 10 minutes before the start. How reminders are identified, including after a reschedule, is in [architecture.md](architecture.md#design-decisions).
+A reminder is therefore sendable from 45 to 10 minutes before the start. How reminders are identified, including after a reschedule, is in [architecture.md](architecture.md#design-decisions).
 
 ## Tips
 

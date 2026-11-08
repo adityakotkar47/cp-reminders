@@ -1,6 +1,6 @@
 # Architecture
 
-The bot posts a reminder for each selected programming contest into the Announcements group of a WhatsApp Community, about 75 minutes before the contest starts. It runs entirely on free hosted services.
+The bot posts a reminder for each selected programming contest into the Announcements group of a WhatsApp Community, 45 minutes before the contest starts. It runs entirely on free hosted services.
 
 ## Requirements
 
@@ -81,7 +81,7 @@ A reminder's `deadline_utc` is its start minus `minLeadMinutes` (10). After the 
 
 ```mermaid
 stateDiagram-v2
-  [*] --> queued: tick, now ≥ start − 75 min
+  [*] --> queued: tick, now ≥ start − 45 min
   queued --> claimed: sender claims (10-minute lease)
   claimed --> sent: ack "sent"
   claimed --> queued: ack "failed", attempts < 3
@@ -203,7 +203,7 @@ sequenceDiagram
 | Failure | Effect | Handling |
 |---|---|---|
 | clist down or rate-limited | No fresh contest data | Codeforces fallback; contests already in the snapshot are still reminded. Shown by `/health` and a yellow badge. |
-| Cron tick late or skipped | Reminder delayed | A reminder stays sendable from 75 to 10 minutes before the start, so ticks can be up to an hour late. The badge turns red after 15 minutes without a tick. |
+| Cron tick late or skipped | Reminder delayed | A reminder stays sendable from 45 to 10 minutes before the start, so ticks can be up to 35 minutes late. The badge turns red after 15 minutes without a tick. |
 | Dispatch fails | Sender not woken | `last_wake_at` stays unchanged, so the next tick dispatches again. |
 | Pending run cancelled by a newer one | None | The outbox keeps the rows; the next run drains them. |
 | Two runs at once | Prevented | Concurrency group `wa-session`. One live connection is also what WhatsApp expects of a device. |

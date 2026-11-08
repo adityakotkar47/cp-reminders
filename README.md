@@ -3,7 +3,7 @@
 [![ci](https://github.com/adityakotkar47/cp-reminders/actions/workflows/ci.yml/badge.svg)](https://github.com/adityakotkar47/cp-reminders/actions/workflows/ci.yml)
 [![bot](https://img.shields.io/endpoint?url=https%3A%2F%2Fcp-reminders.c122.workers.dev%2Fbadge)](https://cp-reminders.c122.workers.dev/health)
 
-Posts a reminder for every Codeforces, CodeChef, LeetCode and AtCoder contest into the Announcements group of the CP community's WhatsApp Community, 75 minutes before it starts.
+Posts a reminder for every Codeforces, CodeChef, LeetCode and AtCoder contest into the Announcements group of the CP community's WhatsApp Community, 45 minutes before it starts.
 
 ```
 🚨 Contest Reminder 🚨
