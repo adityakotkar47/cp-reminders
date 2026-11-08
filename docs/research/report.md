@@ -155,4 +155,4 @@ If phase 5 or the soak shows ephemeral-session trouble (hangs, unexplained logou
 
 The real constraint is not hosting, data or formatting. Those are solved at $0 with well-documented free tiers. The constraint is that Meta offers no sanctioned path into a Community, so the project is a bet that a low-volume, group-only, well-behaved linked device stays under WhatsApp's classifiers. The architecture is built around that bet. It keeps the risky part as small and swappable as possible: one session, one allowlisted JID, a few seconds online a few times a day. The scheduling logic lives where failure is cheap, and every failure ends in a ready-to-paste message rather than silence.
 
-Until then, the honest framing is that this is an unofficial tool on a number you can afford to lose.
+The honest framing is that this is an unofficial tool on a number you can afford to lose.
