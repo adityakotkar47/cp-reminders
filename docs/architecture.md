@@ -108,7 +108,8 @@ stateDiagram-v2
   claimed --> sent: ack "sent"
   claimed --> queued: ack "failed", attempts < 3
   claimed --> failed: ack "failed", attempts = 3
-  claimed --> queued: lease expires
+  claimed --> claimed: lease expires, attempts < 3, and another run claims it
+  claimed --> failed: lease expires, attempts = 3
   queued --> expired: deadline passes
   claimed --> expired: lease expires after the deadline
   expired --> sent: ack "sent" from the claim that was in flight
@@ -117,7 +118,26 @@ stateDiagram-v2
   expired --> [*]
 ```
 
+Only the Worker changes a row's status, in two places:
+
+- **Acknowledgement** (`POST /outbox/ack`): the sender reports `sent` or `failed` for each item it claimed; results from any other claim are ignored.
+- **Sweep**: runs in every tick and at the start of every claim, in the same transaction as the claim. It expires `queued` rows past their deadline, expires `claimed` rows whose lease has run out after the deadline, and fails `claimed` rows whose lease has run out after the last attempt.
+
+`attempts` counts claims: it rises when a run claims the row, so a run that dies without acknowledging also uses one. Its row stays `claimed` with the old lease, and the next claim takes it over once the lease has run out. A `claimed` row past its deadline is left alone until its lease runs out, so a run that is still sending can report `sent`.
+
 `failed` and `expired` are terminal and count as misses: they appear in `/health` and turn the badge red, and the failed workflow run emails the owner with the text in its job summary.
+
+| Column | Set when |
+|---|---|
+| `created_at` | The tick queues the reminder. |
+| `start_utc`, `deadline_utc` | At queueing: the contest start, and the start minus `minLeadMinutes`. |
+| `claimed_at`, `claim_id` | A run claims it; cleared when a failed attempt returns it to `queued`. |
+| `attempts` | Each claim. |
+| `sent_at`, `message_id` | The `sent` acknowledgement; `message_id` is WhatsApp's message ID. |
+| `last_error` | A `failed` acknowledgement, or a lease that runs out after the last attempt. |
+| `updated_at` | Every change; for a `failed` or `expired` row, the time it became so. |
+
+A row holds the latest state, not a history of every transition: a reminder that failed once and was then sent shows `sent`, two attempts and the last error. Each run's own timeline is in its GitHub Actions log, and `sent.json` records when the sender delivered each message.
 
 ### Configuration
 
