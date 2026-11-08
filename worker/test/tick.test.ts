@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { isoUtc } from "../src/core/format.ts";
 import { runTick } from "../src/tick.ts";
 import {
   MIN,
@@ -16,7 +17,6 @@ import {
 
 beforeEach(resetDb);
 
-const iso = (ms: number) => new Date(ms).toISOString();
 const count = async (where = "1 = 1") =>
   (await env.DB.prepare(`SELECT COUNT(*) AS n FROM reminders WHERE ${where}`).first<{ n: number }>())!.n;
 
@@ -34,7 +34,7 @@ describe("runTick: queueing", () => {
       deadline_utc: "2026-11-11T14:20:00.000Z",
       status: "queued",
       attempts: 0,
-      created_at: iso(NOW),
+      created_at: isoUtc(NOW),
     });
     expect(row?.text).toBe(
       [
@@ -104,7 +104,7 @@ describe("runTick: tips", () => {
 
   it("merges D1 tip overrides into the rendered text", async () => {
     await env.DB.prepare("INSERT INTO tip_overrides (href, tip, updated_at) VALUES (?1, 'bring snacks', ?2)")
-      .bind(link, iso(NOW))
+      .bind(link, isoUtc(NOW))
       .run();
     const { fetcher } = mockFetch();
     await runTick(env, NOW, fetcher);
@@ -112,7 +112,7 @@ describe("runTick: tips", () => {
   });
 
   it("treats an empty override as suppressing the tip", async () => {
-    await env.DB.prepare("INSERT INTO tip_overrides (href, tip, updated_at) VALUES (?1, '', ?2)").bind(link, iso(NOW)).run();
+    await env.DB.prepare("INSERT INTO tip_overrides (href, tip, updated_at) VALUES (?1, '', ?2)").bind(link, isoUtc(NOW)).run();
     const { fetcher } = mockFetch();
     await runTick(env, NOW, fetcher);
     expect((await getReminder(STARTERS_264_KEY))?.text).not.toContain("Tip");
@@ -121,7 +121,7 @@ describe("runTick: tips", () => {
 
 describe("runTick: housekeeping and wake", () => {
   it("expires reminders whose deadline passed", async () => {
-    await seedReminder({ key: "late", deadline_utc: iso(NOW - MIN), start_utc: iso(NOW + 9 * MIN) });
+    await seedReminder({ key: "late", deadline_utc: isoUtc(NOW - MIN), start_utc: isoUtc(NOW + 9 * MIN) });
     const { fetcher } = mockFetch();
     await runTick(env, NOW, fetcher);
     expect((await getReminder("late"))?.status).toBe("expired");
@@ -130,7 +130,7 @@ describe("runTick: housekeeping and wake", () => {
   it("records last_tick_at", async () => {
     const { fetcher } = mockFetch();
     await runTick(env, NOW, fetcher);
-    expect(await metaValue("last_tick_at")).toBe(iso(NOW));
+    expect(await metaValue("last_tick_at")).toBe(isoUtc(NOW));
   });
 
   it("wakes the workflow once for a new reminder and debounces the next tick", async () => {

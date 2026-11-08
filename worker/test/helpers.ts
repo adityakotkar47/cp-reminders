@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import type { Contest } from "../src/core/format.ts";
+import { type Contest, isoUtc } from "../src/core/format.ts";
 import upcoming from "./fixtures/clist-upcoming.json" with { type: "json" };
 import type { Fetcher } from "../src/env.ts";
 
@@ -76,8 +76,8 @@ export async function seedReminder(overrides: Partial<ReminderRow> & { key: stri
   const row: ReminderRow = {
     resource_id: 2,
     href: `https://example.test/${overrides.key}`,
-    start_utc: new Date(NOW + 70 * MIN).toISOString(),
-    deadline_utc: new Date(NOW + 60 * MIN).toISOString(),
+    start_utc: isoUtc(NOW + 70 * MIN),
+    deadline_utc: isoUtc(NOW + 60 * MIN),
     text: `text for ${overrides.key}`,
     status: "queued",
     attempts: 0,
@@ -85,8 +85,8 @@ export async function seedReminder(overrides: Partial<ReminderRow> & { key: stri
     claimed_at: null,
     message_id: null,
     last_error: null,
-    created_at: new Date(NOW).toISOString(),
-    updated_at: new Date(NOW).toISOString(),
+    created_at: isoUtc(NOW),
+    updated_at: isoUtc(NOW),
     sent_at: null,
     ...overrides,
   };

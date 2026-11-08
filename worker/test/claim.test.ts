@@ -1,26 +1,25 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { isoUtc } from "../src/core/format.ts";
 import { claimReminders } from "../src/reminders.ts";
 import { MIN, NOW, getReminder, resetDb, seedReminder } from "./helpers.ts";
 
 beforeEach(resetDb);
 
-const iso = (ms: number) => new Date(ms).toISOString();
-
 describe("claimReminders", () => {
   it("claims queued reminders and returns key, text, startUtc and deadlineUtc", async () => {
-    await seedReminder({ key: "a", start_utc: iso(NOW + 70 * MIN), deadline_utc: iso(NOW + 60 * MIN) });
+    await seedReminder({ key: "a", start_utc: isoUtc(NOW + 70 * MIN), deadline_utc: isoUtc(NOW + 60 * MIN) });
     const items = await claimReminders(env, "claim-1", NOW);
 
     expect(items).toEqual([
-      { key: "a", text: "text for a", startUtc: iso(NOW + 70 * MIN), deadlineUtc: iso(NOW + 60 * MIN) },
+      { key: "a", text: "text for a", startUtc: isoUtc(NOW + 70 * MIN), deadlineUtc: isoUtc(NOW + 60 * MIN) },
     ]);
     expect(await getReminder("a")).toMatchObject({
       status: "claimed",
       claim_id: "claim-1",
-      claimed_at: iso(NOW),
+      claimed_at: isoUtc(NOW),
       attempts: 1,
-      updated_at: iso(NOW),
+      updated_at: isoUtc(NOW),
     });
   });
 
@@ -30,7 +29,7 @@ describe("claimReminders", () => {
 
   it("claims at most 5 per call, earliest start first", async () => {
     for (let i = 0; i < 7; i++) {
-      await seedReminder({ key: `r${i}`, start_utc: iso(NOW + (100 - i) * MIN), deadline_utc: iso(NOW + (90 - i) * MIN) });
+      await seedReminder({ key: `r${i}`, start_utc: isoUtc(NOW + (100 - i) * MIN), deadline_utc: isoUtc(NOW + (90 - i) * MIN) });
     }
     const items = await claimReminders(env, "c", NOW);
     expect(items.map((i) => i.key)).toEqual(["r6", "r5", "r4", "r3", "r2"]);
@@ -54,7 +53,7 @@ describe("claimReminders", () => {
   });
 
   it("two overlapping claims never receive the same reminder", async () => {
-    for (let i = 0; i < 8; i++) await seedReminder({ key: `r${i}`, start_utc: iso(NOW + (100 + i) * MIN), deadline_utc: iso(NOW + (90 + i) * MIN) });
+    for (let i = 0; i < 8; i++) await seedReminder({ key: `r${i}`, start_utc: isoUtc(NOW + (100 + i) * MIN), deadline_utc: isoUtc(NOW + (90 + i) * MIN) });
     const [a, b] = await Promise.all([claimReminders(env, "A", NOW), claimReminders(env, "B", NOW)]);
     const keys = [...a, ...b].map((i) => i.key);
     expect(new Set(keys).size).toBe(keys.length);
@@ -62,7 +61,7 @@ describe("claimReminders", () => {
   });
 
   it("expires queued reminders past their deadline instead of handing them out", async () => {
-    await seedReminder({ key: "late", start_utc: iso(NOW + 5 * MIN), deadline_utc: iso(NOW - 5 * MIN) });
+    await seedReminder({ key: "late", start_utc: isoUtc(NOW + 5 * MIN), deadline_utc: isoUtc(NOW - 5 * MIN) });
     expect(await claimReminders(env, "c", NOW)).toEqual([]);
     expect(await getReminder("late")).toMatchObject({ status: "expired", attempts: 0 });
   });
@@ -73,9 +72,9 @@ describe("claimReminders", () => {
       status: "claimed",
       attempts: 1,
       claim_id: "old",
-      claimed_at: iso(NOW - 20 * MIN),
-      start_utc: iso(NOW + 5 * MIN),
-      deadline_utc: iso(NOW - 5 * MIN),
+      claimed_at: isoUtc(NOW - 20 * MIN),
+      start_utc: isoUtc(NOW + 5 * MIN),
+      deadline_utc: isoUtc(NOW - 5 * MIN),
     });
     expect(await claimReminders(env, "c", NOW)).toEqual([]);
     expect(await getReminder("stuck")).toMatchObject({ status: "expired", claim_id: "old" });
@@ -87,9 +86,9 @@ describe("claimReminders", () => {
       status: "claimed",
       attempts: 1,
       claim_id: "old",
-      claimed_at: iso(NOW - 2 * MIN),
-      start_utc: iso(NOW + 5 * MIN),
-      deadline_utc: iso(NOW - 1 * MIN),
+      claimed_at: isoUtc(NOW - 2 * MIN),
+      start_utc: isoUtc(NOW + 5 * MIN),
+      deadline_utc: isoUtc(NOW - 1 * MIN),
     });
     expect(await claimReminders(env, "c", NOW)).toEqual([]);
     expect(await getReminder("inflight")).toMatchObject({ status: "claimed", claim_id: "old" });
@@ -101,7 +100,7 @@ describe("claimReminders", () => {
       status: "claimed",
       attempts: 3,
       claim_id: "old",
-      claimed_at: iso(NOW - 11 * MIN),
+      claimed_at: isoUtc(NOW - 11 * MIN),
     });
     expect(await claimReminders(env, "c", NOW)).toEqual([]);
     expect(await getReminder("worn")).toMatchObject({ status: "failed" });

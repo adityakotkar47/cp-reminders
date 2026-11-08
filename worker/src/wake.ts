@@ -1,4 +1,6 @@
+import { isoUtc } from "./core/format.ts";
 import type { Env, Fetcher } from "./env.ts";
+import { errorMessage } from "./errors.ts";
 import { getMeta, setMeta } from "./meta.ts";
 import { hasPendingReminders } from "./reminders.ts";
 
@@ -33,8 +35,8 @@ export async function maybeWake(env: Env, nowMs: number, fetcher: Fetcher): Prom
   try {
     await dispatch(env, fetcher);
   } catch (e) {
-    return { woke: false, error: e instanceof Error ? e.message : String(e) };
+    return { woke: false, error: errorMessage(e) };
   }
-  await setMeta(env.DB, "last_wake_at", new Date(nowMs).toISOString()).run();
+  await setMeta(env.DB, "last_wake_at", isoUtc(nowMs)).run();
   return { woke: true };
 }

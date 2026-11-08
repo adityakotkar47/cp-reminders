@@ -1,4 +1,4 @@
-import { formatReminder, formatTime, istClock, utcMs } from "./core/format.ts";
+import { IST_OFFSET_MS, formatReminder, formatTime, istClock, utcMs } from "./core/format.ts";
 import { selectContests } from "./core/select.ts";
 import { rules, tipRules } from "./config.ts";
 import { ensureSnapshot } from "./contests.ts";
@@ -7,7 +7,6 @@ import { loadOverrides } from "./tips.ts";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const IST_OFFSET_MS = 330 * 60_000;
 const PREVIEW_LIMIT = 10;
 const SEPARATOR = "\n\n----------------------------------------\n\n";
 

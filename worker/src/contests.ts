@@ -1,5 +1,6 @@
-import { type Contest, PLATFORM, utcMs } from "./core/format.ts";
+import { type Contest, PLATFORM, isoUtc, utcMs } from "./core/format.ts";
 import type { Env, Fetcher } from "./env.ts";
+import { errorMessage } from "./errors.ts";
 import { deleteMeta, setMeta } from "./meta.ts";
 
 export type Source = "clist" | "codeforces";
@@ -13,9 +14,8 @@ export interface SnapshotResult {
 const SNAPSHOT_TTL_MS = 60 * 60_000;
 const REQUEST_TIMEOUT_MS = 8_000;
 
-const isoNoZ = (ms: number) => new Date(ms).toISOString().slice(0, 19);
+const isoNoZ = (ms: number) => isoUtc(ms).slice(0, 19);
 const byStart = (a: Contest, b: Contest) => a.start.localeCompare(b.start);
-const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 interface CodeforcesContest {
   id: number;
@@ -87,7 +87,7 @@ async function saveSnapshot(
   contests: Contest[],
   error: string | null,
 ): Promise<void> {
-  const fetchedAt = new Date(nowMs).toISOString();
+  const fetchedAt = isoUtc(nowMs);
   await env.DB.batch([
     env.DB
       .prepare(
@@ -112,7 +112,7 @@ export async function ensureSnapshot(env: Env, nowMs: number, fetcher: Fetcher):
     await saveSnapshot(env, nowMs, "clist", contests, null);
     return { contests, fetched: true };
   } catch (e) {
-    clistError = errorText(e);
+    clistError = errorMessage(e);
   }
 
   try {
@@ -122,7 +122,7 @@ export async function ensureSnapshot(env: Env, nowMs: number, fetcher: Fetcher):
     await saveSnapshot(env, nowMs, "codeforces", contests, clistError);
     return { contests, fetched: true, error: clistError };
   } catch (e) {
-    const error = `${clistError}; ${errorText(e)}`;
+    const error = `${clistError}; ${errorMessage(e)}`;
     await setMeta(env.DB, "last_fetch_error", error).run();
     return { contests: previous, fetched: false, error };
   }

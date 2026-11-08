@@ -1,12 +1,10 @@
-import { badRequest, json, readJson, text } from "./http.ts";
+import { isoUtc } from "./core/format.ts";
+import { badRequest, isRecord, json, readJson, text } from "./http.ts";
 import { renderPreview } from "./preview.ts";
 import type { Route } from "./router.ts";
 
 const MAX_HREF_LENGTH = 500;
 const MAX_TIP_LENGTH = 500;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
 
 function parseHref(value: unknown): string | undefined {
   if (typeof value !== "string" || value.length === 0 || value.length > MAX_HREF_LENGTH) return undefined;
@@ -43,7 +41,7 @@ export const adminRoutes: Route[] = [
           "INSERT INTO tip_overrides (href, tip, updated_at) VALUES (?1, ?2, ?3) " +
             "ON CONFLICT(href) DO UPDATE SET tip = excluded.tip, updated_at = excluded.updated_at",
         )
-        .bind(href, tip, new Date(now).toISOString())
+        .bind(href, tip, isoUtc(now))
         .run();
       return json({ ok: true });
     },

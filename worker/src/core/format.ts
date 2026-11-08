@@ -22,7 +22,9 @@ export const PLATFORM: Readonly<Record<number, string>> = {
   102: "LeetCode",
 };
 
-const IST_OFFSET_MS = 330 * 60_000;
+export const IST_OFFSET_MS = 330 * 60_000;
+
+export const isoUtc = (ms: number): string => new Date(ms).toISOString();
 
 export function utcMs(s: string): number {
   const iso = /[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s : `${s}Z`;

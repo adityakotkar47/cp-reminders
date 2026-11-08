@@ -1,4 +1,4 @@
-import { type Contest, formatReminder, utcMs } from "./core/format.ts";
+import { type Contest, formatReminder, isoUtc, utcMs } from "./core/format.ts";
 import { dueReminders, reminderKey } from "./core/select.ts";
 import { rules, tipRules } from "./config.ts";
 import { ensureSnapshot } from "./contests.ts";
@@ -15,8 +15,6 @@ export interface TickResult {
   errors: string[];
 }
 
-const iso = (ms: number) => new Date(ms).toISOString();
-
 function insertStatement(db: D1Database, c: Contest, text: string, nowMs: number): D1PreparedStatement {
   const startMs = utcMs(c.start);
   return db
@@ -28,10 +26,10 @@ function insertStatement(db: D1Database, c: Contest, text: string, nowMs: number
       reminderKey(c),
       c.resource_id,
       c.href,
-      iso(startMs),
-      iso(startMs - rules.minLeadMinutes * 60_000),
+      isoUtc(startMs),
+      isoUtc(startMs - rules.minLeadMinutes * 60_000),
       text,
-      iso(nowMs),
+      isoUtc(nowMs),
     );
 }
 
@@ -48,7 +46,7 @@ export async function runTick(env: Env, nowMs: number, fetcher: Fetcher): Promis
   const outcomes = await env.DB.batch([
     ...sweeps,
     ...inserts,
-    setMeta(env.DB, "last_tick_at", iso(nowMs)),
+    setMeta(env.DB, "last_tick_at", isoUtc(nowMs)),
   ]);
   const queued = outcomes.slice(sweeps.length, sweeps.length + inserts.length).reduce((sum, o) => sum + o.meta.changes, 0);
 

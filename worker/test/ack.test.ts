@@ -1,14 +1,13 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
+import { isoUtc } from "../src/core/format.ts";
 import { ackReminders, claimReminders } from "../src/reminders.ts";
 import { MIN, NOW, getReminder, resetDb, seedReminder } from "./helpers.ts";
 
 beforeEach(resetDb);
 
-const iso = (ms: number) => new Date(ms).toISOString();
-
 async function claimed(key: string, attempts = 1, claimId = "c1") {
-  await seedReminder({ key, status: "claimed", attempts, claim_id: claimId, claimed_at: iso(NOW - 2 * MIN) });
+  await seedReminder({ key, status: "claimed", attempts, claim_id: claimId, claimed_at: isoUtc(NOW - 2 * MIN) });
 }
 
 describe("ackReminders", () => {
@@ -19,8 +18,8 @@ describe("ackReminders", () => {
     expect(await getReminder("a")).toMatchObject({
       status: "sent",
       message_id: "WAMID.1",
-      sent_at: iso(NOW),
-      updated_at: iso(NOW),
+      sent_at: isoUtc(NOW),
+      updated_at: isoUtc(NOW),
       last_error: null,
     });
   });
@@ -86,18 +85,18 @@ describe("ackReminders", () => {
     await ackReminders(env, "c1", [{ key: "a", status: "sent", messageId: "m1" }], NOW);
     const applied = await ackReminders(env, "c1", [{ key: "a", status: "sent", messageId: "m2" }], NOW + MIN);
     expect(applied).toBe(0);
-    expect(await getReminder("a")).toMatchObject({ message_id: "m1", sent_at: iso(NOW) });
+    expect(await getReminder("a")).toMatchObject({ message_id: "m1", sent_at: isoUtc(NOW) });
   });
 
   it("still records a sent ack for a reminder that expired while the message was in flight", async () => {
-    await seedReminder({ key: "a", status: "expired", attempts: 1, claim_id: "c1", claimed_at: iso(NOW - 20 * MIN) });
+    await seedReminder({ key: "a", status: "expired", attempts: 1, claim_id: "c1", claimed_at: isoUtc(NOW - 20 * MIN) });
     const applied = await ackReminders(env, "c1", [{ key: "a", status: "sent", messageId: "m1" }], NOW);
     expect(applied).toBe(1);
     expect((await getReminder("a"))?.status).toBe("sent");
   });
 
   it("does not resurrect an expired reminder from a failed ack", async () => {
-    await seedReminder({ key: "a", status: "expired", attempts: 1, claim_id: "c1", claimed_at: iso(NOW - 20 * MIN) });
+    await seedReminder({ key: "a", status: "expired", attempts: 1, claim_id: "c1", claimed_at: isoUtc(NOW - 20 * MIN) });
     const applied = await ackReminders(env, "c1", [{ key: "a", status: "failed", error: "x" }], NOW);
     expect(applied).toBe(0);
     expect((await getReminder("a"))?.status).toBe("expired");

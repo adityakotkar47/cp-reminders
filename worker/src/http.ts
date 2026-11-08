@@ -1,5 +1,8 @@
 const NO_STORE = { "Cache-Control": "no-store" };
 
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
 export const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), {
     status,

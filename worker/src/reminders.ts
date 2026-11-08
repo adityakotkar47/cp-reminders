@@ -1,3 +1,4 @@
+import { isoUtc } from "./core/format.ts";
 import type { Env } from "./env.ts";
 
 export interface ClaimedItem {
@@ -14,11 +15,9 @@ const MAX_CLAIM = 5;
 const ELIGIBLE =
   "deadline_utc >= ?1 AND attempts < ?3 AND (status = 'queued' OR (status = 'claimed' AND claimed_at <= ?2))";
 
-const iso = (ms: number) => new Date(ms).toISOString();
-
 export function sweepStatements(db: D1Database, nowMs: number): D1PreparedStatement[] {
-  const now = iso(nowMs);
-  const leaseCut = iso(nowMs - LEASE_MS);
+  const now = isoUtc(nowMs);
+  const leaseCut = isoUtc(nowMs - LEASE_MS);
   return [
     db
       .prepare("UPDATE reminders SET status = 'expired', updated_at = ?1 WHERE status = 'queued' AND deadline_utc < ?1")
@@ -46,14 +45,14 @@ interface ClaimedRow {
 }
 
 export async function claimReminders(env: Env, claimId: string, nowMs: number): Promise<ClaimedItem[]> {
-  const now = iso(nowMs);
+  const now = isoUtc(nowMs);
   const claim = env.DB
     .prepare(
       "UPDATE reminders SET status = 'claimed', claim_id = ?4, claimed_at = ?1, attempts = attempts + 1, updated_at = ?1 " +
         `WHERE key IN (SELECT key FROM reminders WHERE ${ELIGIBLE} ORDER BY start_utc, key LIMIT ?5) ` +
         "RETURNING key, text, start_utc, deadline_utc",
     )
-    .bind(now, iso(nowMs - LEASE_MS), MAX_ATTEMPTS, claimId, MAX_CLAIM);
+    .bind(now, isoUtc(nowMs - LEASE_MS), MAX_ATTEMPTS, claimId, MAX_CLAIM);
   const results = await env.DB.batch<ClaimedRow>([...sweepStatements(env.DB, nowMs), claim]);
   const rows = results[results.length - 1]?.results ?? [];
   return rows
@@ -94,7 +93,7 @@ function ackStatement(db: D1Database, claimId: string, r: AckResult, now: string
 
 export async function ackReminders(env: Env, claimId: string, results: AckResult[], nowMs: number): Promise<number> {
   if (results.length === 0) return 0;
-  const now = iso(nowMs);
+  const now = isoUtc(nowMs);
   const outcomes = await env.DB.batch(results.map((r) => ackStatement(env.DB, claimId, r, now)));
   return outcomes.reduce((sum, o) => sum + o.meta.changes, 0);
 }
@@ -102,7 +101,7 @@ export async function ackReminders(env: Env, claimId: string, results: AckResult
 export async function hasPendingReminders(env: Env, nowMs: number): Promise<boolean> {
   const row = await env.DB
     .prepare(`SELECT 1 AS pending FROM reminders WHERE ${ELIGIBLE} LIMIT 1`)
-    .bind(iso(nowMs), iso(nowMs - LEASE_MS), MAX_ATTEMPTS)
+    .bind(isoUtc(nowMs), isoUtc(nowMs - LEASE_MS), MAX_ATTEMPTS)
     .first();
   return row !== null;
 }

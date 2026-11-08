@@ -1,3 +1,4 @@
+import { isoUtc } from "./core/format.ts";
 import { json } from "./http.ts";
 import { getAllMeta } from "./meta.ts";
 import type { Route } from "./router.ts";
@@ -15,7 +16,7 @@ export const healthRoute: Route = {
   method: "GET",
   path: "/health",
   async handle({ env, now }) {
-    const since = new Date(now - DAY_MS).toISOString();
+    const since = isoUtc(now - DAY_MS);
     const [counts, meta] = await Promise.all([
       env.DB
         .prepare(

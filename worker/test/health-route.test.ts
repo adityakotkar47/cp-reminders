@@ -1,5 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { isoUtc } from "../src/core/format.ts";
 import { MIN, NOW, mockFetch, resetDb, seedReminder } from "./helpers.ts";
 
 beforeEach(async () => {
@@ -12,7 +13,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const iso = (ms: number) => new Date(ms).toISOString();
 const health = () => exports.default.fetch("https://w.test/health");
 
 describe("GET /health", () => {
@@ -35,12 +35,12 @@ describe("GET /health", () => {
   it("counts reminders by state and limits failed and expired to the last 24 hours", async () => {
     await seedReminder({ key: "q1" });
     await seedReminder({ key: "q2" });
-    await seedReminder({ key: "c1", status: "claimed", attempts: 1, claim_id: "x", claimed_at: iso(NOW) });
+    await seedReminder({ key: "c1", status: "claimed", attempts: 1, claim_id: "x", claimed_at: isoUtc(NOW) });
     await seedReminder({ key: "s1", status: "sent" });
-    await seedReminder({ key: "f-new", status: "failed", updated_at: iso(NOW - 23 * 60 * MIN) });
-    await seedReminder({ key: "f-old", status: "failed", updated_at: iso(NOW - 25 * 60 * MIN) });
-    await seedReminder({ key: "e-new", status: "expired", updated_at: iso(NOW - 60 * MIN) });
-    await seedReminder({ key: "e-old", status: "expired", updated_at: iso(NOW - 48 * 60 * MIN) });
+    await seedReminder({ key: "f-new", status: "failed", updated_at: isoUtc(NOW - 23 * 60 * MIN) });
+    await seedReminder({ key: "f-old", status: "failed", updated_at: isoUtc(NOW - 25 * 60 * MIN) });
+    await seedReminder({ key: "e-new", status: "expired", updated_at: isoUtc(NOW - 60 * MIN) });
+    await seedReminder({ key: "e-old", status: "expired", updated_at: isoUtc(NOW - 48 * 60 * MIN) });
     expect(await (await health()).json()).toMatchObject({ queued: 2, claimed: 1, failed24h: 1, expired24h: 1 });
   });
 
@@ -49,7 +49,7 @@ describe("GET /health", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => mock.fetcher(String(input), init));
     await exports.default.fetch("https://w.test/tick", { method: "POST", headers: { Authorization: `Bearer ${env.TICK_TOKEN}` } });
     expect(await (await health()).json()).toMatchObject({
-      lastTickAt: iso(NOW),
+      lastTickAt: isoUtc(NOW),
       lastFetchAt: null,
       lastFetchError: expect.stringContaining("clist HTTP 500"),
     });
