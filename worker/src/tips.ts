@@ -1,4 +1,4 @@
-import type { TipOverrides } from "../../src/format.ts";
+import type { TipOverrides } from "./core/format.ts";
 import { baseOverrides } from "./config.ts";
 import type { Env } from "./env.ts";
 

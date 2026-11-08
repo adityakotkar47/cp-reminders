@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
-import type { Contest } from "../../src/format.ts";
-import upcoming from "../../fixtures/clist-upcoming.json" with { type: "json" };
+import type { Contest } from "../src/core/format.ts";
+import upcoming from "./fixtures/clist-upcoming.json" with { type: "json" };
 import type { Fetcher } from "../src/env.ts";
 
 export const MIN = 60_000;

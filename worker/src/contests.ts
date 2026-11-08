@@ -1,4 +1,4 @@
-import { type Contest, PLATFORM, utcMs } from "../../src/format.ts";
+import { type Contest, PLATFORM, utcMs } from "./core/format.ts";
 import type { Env, Fetcher } from "./env.ts";
 import { deleteMeta, setMeta } from "./meta.ts";
 

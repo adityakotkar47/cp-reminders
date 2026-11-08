@@ -1,5 +1,5 @@
-import { type Contest, formatReminder, utcMs } from "../../src/format.ts";
-import { dueReminders, reminderKey } from "../../src/select.ts";
+import { type Contest, formatReminder, utcMs } from "./core/format.ts";
+import { dueReminders, reminderKey } from "./core/select.ts";
 import { rules, tipRules } from "./config.ts";
 import { ensureSnapshot } from "./contests.ts";
 import type { Env, Fetcher } from "./env.ts";

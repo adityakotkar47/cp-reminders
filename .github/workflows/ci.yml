@@ -12,20 +12,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  core:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
-        with:
-          runtime: node@24
-          cache: true
-      - run: pnpm test
-      - run: pnpm typecheck
-
   worker:
     runs-on: ubuntu-latest
     timeout-minutes: 10

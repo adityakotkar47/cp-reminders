@@ -1,5 +1,5 @@
-import { formatReminder, formatTime, istClock, utcMs } from "../../src/format.ts";
-import { selectContests } from "../../src/select.ts";
+import { formatReminder, formatTime, istClock, utcMs } from "./core/format.ts";
+import { selectContests } from "./core/select.ts";
 import { rules, tipRules } from "./config.ts";
 import { ensureSnapshot } from "./contests.ts";
 import type { Env, Fetcher } from "./env.ts";
