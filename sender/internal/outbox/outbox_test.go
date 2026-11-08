@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 const testToken = "s3cr3t-sender-token"
@@ -99,6 +100,26 @@ func TestClaimRejectsMalformedJSON(t *testing.T) {
 	defer srv.Close()
 	if _, err := newTestClient(srv.URL).Claim(context.Background(), "c"); err == nil {
 		t.Fatal("Claim accepted malformed JSON")
+	}
+}
+
+func TestErrorBodyIsTruncatedToValidUTF8(t *testing.T) {
+	body := "x" + strings.Repeat("é", maxErrorBody)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, body, http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	_, err := newTestClient(srv.URL).Claim(context.Background(), "c")
+	se, ok := errors.AsType[*StatusError](err)
+	if !ok {
+		t.Fatalf("Claim: got %v, want *StatusError", err)
+	}
+	if !utf8.ValidString(se.Body) {
+		t.Errorf("body is not valid UTF-8: %q", se.Body)
+	}
+	if !strings.HasSuffix(se.Body, "…") || len(se.Body) > maxErrorBody+len("…") {
+		t.Errorf("body not truncated to %d bytes: %q", maxErrorBody, se.Body)
 	}
 }
 
