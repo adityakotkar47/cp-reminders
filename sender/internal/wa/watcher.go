@@ -54,14 +54,12 @@ func (w *watcher) fail(err error) {
 	})
 }
 
-// Err returns the first fatal event seen, if any.
 func (w *watcher) Err() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.err
 }
 
-// Done is closed when a fatal event is seen.
 func (w *watcher) Done() <-chan struct{} { return w.done }
 
 func (w *watcher) waitConnected(ctx context.Context, timeout time.Duration) error {
