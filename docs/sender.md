@@ -1,8 +1,8 @@
 # Sender
 
-The sender (`sender/`, Go) is the only component that talks to WhatsApp. It claims queued reminders from the Worker's outbox, posts each one to the community's Announcements group, records what it delivered, and acks the results. It runs as a short GitHub Actions job, or as a fallback daemon (see `architecture.md`). It never decides what to send or when, and it never accepts a destination from the network.
+The sender (`sender/`, Go) is the only component that talks to WhatsApp. It claims queued reminders from the Worker's outbox, posts each one to the community's Announcements group, records what it delivered, and acks the results. It runs as a short GitHub Actions job. If that stops being viable, the same outbox API could serve an always-on host ([Fallback deployment](architecture.md#fallback-deployment)), but the sender has no daemon mode. It never decides what to send or when, and it never accepts a destination from the network.
 
-It is an unofficial linked device built on [whatsmeow](https://pkg.go.dev/go.mau.fi/whatsmeow), pinned to `go.mau.fi/whatsmeow v0.0.0-20261106223246-93ce5f1e6023`.
+It is an unofficial linked device built on [whatsmeow](https://pkg.go.dev/go.mau.fi/whatsmeow).
 
 ## Commands
 
@@ -59,20 +59,7 @@ Any failure exits 1 and writes the step summary. This covers a connect failure, 
 
 Message text appears only in the `--dry-run` output and in the failure step summary. It is never in the normal log.
 
-## GitHub Actions contract
-
-`.github/workflows/send.yml` is documented in `workflow.md`. The sender expects the following from it:
-
-- Concurrency group `wa-session`, so only one connection is ever live.
-- Branch `state` checked out into `./state`, for example with `actions/checkout` using `ref: state` and `path: state`.
-- Go set up from `sender/go.mod`, e.g. `actions/setup-go` with `go-version-file: sender/go.mod`. The module needs Go 1.26 or later.
-- The run step must be:
-  ```sh
-  go -C sender run ./cmd/wa drain --state ../state --jitter 90s
-  ```
-  `go run ./sender/cmd/wa` from the root does not work, because the root has no `go.mod` ("cannot find main module"). With `-C sender`, `--state` is relative to `sender/`.
-- Environment for that step from secrets: `WORKER_URL`, `SENDER_TOKEN`, `AGE_IDENTITY`, `ANNOUNCE_JID`. `GITHUB_STEP_SUMMARY` is provided by the runner.
-- After the step, commit `./state` back to `state` with `if: always()`, because keys rotate even on failure.
+The workflow that runs `wa drain` is described in [workflow.md](workflow.md#sendyml-wake-and-drain).
 
 ## Pairing procedure
 
@@ -165,11 +152,9 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go -C sender build ./cmd/wa
 
 ## Sources behind the implementation choices
 
-Everything below was checked against the module sources at the pinned versions.
-
-- **whatsmeow store on pure-Go SQLite.** `sqlstore.NewWithDB(db, "sqlite3", log)` takes the dialect separately from the `database/sql` driver. The dialect parser accepts any name starting with `sqlite` (`go.mau.fi/util/dbutil.ParseDialect`). `Container.Upgrade` fails with "foreign keys are not enabled" unless `PRAGMA foreign_keys` is on, and the docs say "it's strongly recommended to enable foreign keys" ([store/sqlstore/container.go](https://pkg.go.dev/go.mau.fi/whatsmeow/store/sqlstore#New)). This lets the sender use [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) v1.62.0, which registers driver `"sqlite"` and runs each `_pragma=` DSN value on every new connection (`driver.go`). The DSN is `…/session.db?_pragma=foreign_keys(1)&_pragma=busy_timeout(10000)&_pragma=journal_mode(DELETE)`. The result builds with `CGO_ENABLED=0`. `DELETE` journal mode leaves no `-wal`/`-shm` side files, so the single closed `.db` file is the whole state.
+- **whatsmeow store on pure-Go SQLite.** `sqlstore.NewWithDB(db, "sqlite3", log)` takes the dialect separately from the `database/sql` driver. The dialect parser accepts any name starting with `sqlite` (`go.mau.fi/util/dbutil.ParseDialect`). `Container.Upgrade` fails with "foreign keys are not enabled" unless `PRAGMA foreign_keys` is on, and the docs say "it's strongly recommended to enable foreign keys" ([store/sqlstore/container.go](https://pkg.go.dev/go.mau.fi/whatsmeow/store/sqlstore#New)). This lets the sender use [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite), which registers driver `"sqlite"` and runs each `_pragma=` DSN value on every new connection (`driver.go`). The DSN is `…/session.db?_pragma=foreign_keys(1)&_pragma=busy_timeout(10000)&_pragma=journal_mode(DELETE)`. The result builds with `CGO_ENABLED=0`. `DELETE` journal mode leaves no `-wal`/`-shm` side files, so the single closed `.db` file is the whole state.
 - **Group fields.** `types.GroupInfo` embeds `GroupName{Name}`, `GroupParent{IsParent}`, `GroupLinkedParent{LinkedParentJID}`, `GroupIsDefaultSub{IsDefaultSubGroup}` and `GroupAnnounce{IsAnnounce}`. `Participants []GroupParticipant` carries `JID`, `PhoneNumber`, `LID`, `IsAdmin` and `IsSuperAdmin` ([types/group.go](https://pkg.go.dev/go.mau.fi/whatsmeow/types#GroupInfo)). In LID-addressed groups the participant `JID` is a LID, so admin checks compare against both `Store.ID` and `Store.LID`. `GetJoinedGroups(ctx)` and `GetGroupInfo(ctx, jid)` take a context.
 - **Pairing.** `GetQRChannel` must be called before `Connect`, and emits `code`, `success`, `timeout`, `error` and passkey items ([qrchan.go](https://pkg.go.dev/go.mau.fi/whatsmeow#Client.GetQRChannel)). `PairPhone(ctx, phone, showPushNotification, clientType, clientDisplayName)` must be called after connecting and after the first QR event. The display name "must be formatted as `Browser (OS)`", and the server validates it, so the sender uses `Chrome (Linux)`. Codes expire with the QR window, about 160 s ([pair-code.go](https://pkg.go.dev/go.mau.fi/whatsmeow#Client.PairPhone)). `PairSuccess` "is generally followed by a websocket reconnection, so you should wait for the Connected before trying to send anything" (types/events). Passkey pairing (`PairPasskeyRequest`) needs a WebAuthn response, which a CLI cannot give, so it is rejected.
 - **Fatal events.** `LoggedOut` ("the client has been unpaired from the phone"), `StreamReplaced` ("another client connecting with the same keys"), `TemporaryBan`, `ConnectFailure`, `ClientOutdated`, `StreamError` and `PairError` all end the run with a distinct error ([types/events](https://pkg.go.dev/go.mau.fi/whatsmeow/types/events)). On `device_removed`, whatsmeow deletes the device from the store itself, which is why the next run reports "not paired". `Disconnect()` waits up to 5 s for the event-handler queue before returning, so store writes caused by the last events finish before the database is closed and encrypted.
 - **Sending.** `SendMessage(ctx, to, *waE2E.Message, …)` returns a `SendResponse` whose `ID` is the message id stored in `sent.json` and the ack ([send.go](https://pkg.go.dev/go.mau.fi/whatsmeow#Client.SendMessage)).
-- **Encryption.** [filippo.io/age](https://pkg.go.dev/filippo.io/age) v1.3.2: `GenerateX25519Identity`, `ParseX25519Identity`, and `Encrypt(dst, recipient)`, whose writer "must" be closed "for the last chunk to be encrypted and flushed". The file is encrypted to the identity's own recipient, so a single secret both reads and writes the state. Writes go to a temp file in the same directory and are then renamed, so a crash never leaves a truncated `session.db.age`.
+- **Encryption.** [filippo.io/age](https://pkg.go.dev/filippo.io/age): `GenerateX25519Identity`, `ParseX25519Identity`, and `Encrypt(dst, recipient)`, whose writer "must" be closed "for the last chunk to be encrypted and flushed". The file is encrypted to the identity's own recipient, so a single secret both reads and writes the state. Writes go to a temp file in the same directory and are then renamed, so a crash never leaves a truncated `session.db.age`.
