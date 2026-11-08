@@ -56,7 +56,7 @@ const SPONSORED_CODEFORCES = /\((Codeforces Round \d+),\s*([^)]*)\)\s*$/;
 const SPONSORED_ATCODER = /[（(]\s*(AtCoder (?:Beginner|Regular|Grand) Contest\S*\s*\d+)\s*[)）]\s*$/;
 const TRAILING_PARENTHETICAL = /\s*\([^)]*\)\s*$/;
 
-export function displayName(c: Contest): string {
+function displayName(c: Contest): string {
   switch (c.resource_id) {
     case 1: {
       const m = c.event.match(SPONSORED_CODEFORCES);
@@ -73,11 +73,11 @@ export function displayName(c: Contest): string {
   }
 }
 
-export function displayLink(c: Contest): string {
+function displayLink(c: Contest): string {
   return c.resource_id === 102 && !c.href.endsWith("/") ? `${c.href}/` : c.href;
 }
 
-export function pickTip(c: Contest, tips: readonly Tip[], overrides: TipOverrides = {}): string | undefined {
+function pickTip(c: Contest, tips: readonly Tip[], overrides: TipOverrides = {}): string | undefined {
   for (const key of [c.href, displayLink(c)]) {
     if (Object.hasOwn(overrides, key)) return overrides[key] || undefined;
   }

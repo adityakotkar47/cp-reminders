@@ -7,9 +7,9 @@ export interface ClaimedItem {
   deadlineUtc: string;
 }
 
-export const LEASE_MS = 10 * 60_000;
-export const MAX_ATTEMPTS = 3;
-export const MAX_CLAIM = 5;
+const LEASE_MS = 10 * 60_000;
+const MAX_ATTEMPTS = 3;
+const MAX_CLAIM = 5;
 
 const ELIGIBLE =
   "deadline_utc >= ?1 AND attempts < ?3 AND (status = 'queued' OR (status = 'claimed' AND claimed_at <= ?2))";

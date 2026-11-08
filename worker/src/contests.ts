@@ -10,7 +10,7 @@ export interface SnapshotResult {
   error?: string;
 }
 
-export const SNAPSHOT_TTL_MS = 60 * 60_000;
+const SNAPSHOT_TTL_MS = 60 * 60_000;
 const REQUEST_TIMEOUT_MS = 8_000;
 
 const isoNoZ = (ms: number) => new Date(ms).toISOString().slice(0, 19);
