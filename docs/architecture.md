@@ -255,8 +255,8 @@ worker/              Cloudflare Worker (pnpm workspace package)
   src/core/          contest selection and message formatting
   src/               scheduler, outbox API, health, badge
   test/              Worker tests in the Workers runtime with a local D1
-  test/core/         golden tests against the manual reminder history
-  test/fixtures/     frozen clist data and manual reminders from 2026-11-07
+  test/core/         rule tests and golden tests against the manual reminder history
+  test/fixtures/     frozen clist data and the community's manual reminders, August 2025 to November 2026
 sender/              Go module: cmd/wa, internal/{drain,outbox,state,wa}
 .github/workflows/   send.yml (drain the outbox), ci.yml (checks on push)
 docs/                architecture, formatter, scheduler, sender, workflow
