@@ -2,7 +2,7 @@ import { IST_OFFSET_MS, formatReminder, formatTime, istClock, utcMs } from "./co
 import { selectContests } from "./core/select.ts";
 import { rules, tipRules } from "./config.ts";
 import { ensureSnapshot } from "./contests.ts";
-import type { Env, Fetcher } from "./env.ts";
+import type { Fetcher } from "./env.ts";
 import { loadOverrides } from "./tips.ts";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];

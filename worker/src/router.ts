@@ -1,5 +1,5 @@
 import { isAuthorized } from "./auth.ts";
-import type { Env, Fetcher } from "./env.ts";
+import type { Fetcher } from "./env.ts";
 import { text } from "./http.ts";
 
 export type SecretName = "TICK_TOKEN" | "ADMIN_TOKEN" | "SENDER_TOKEN";

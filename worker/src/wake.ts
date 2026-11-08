@@ -1,5 +1,5 @@
 import { isoUtc } from "./core/format.ts";
-import type { Env, Fetcher } from "./env.ts";
+import type { Fetcher } from "./env.ts";
 import { errorMessage } from "./errors.ts";
 import { getMeta, setMeta } from "./meta.ts";
 import { hasPendingReminders } from "./reminders.ts";

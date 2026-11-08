@@ -1,5 +1,4 @@
 import { isoUtc } from "./core/format.ts";
-import type { Env } from "./env.ts";
 
 export interface ClaimedItem {
   key: string;

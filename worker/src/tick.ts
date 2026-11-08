@@ -2,7 +2,7 @@ import { type Contest, formatReminder, isoUtc, utcMs } from "./core/format.ts";
 import { dueReminders, reminderKey } from "./core/select.ts";
 import { rules, tipRules } from "./config.ts";
 import { ensureSnapshot } from "./contests.ts";
-import type { Env, Fetcher } from "./env.ts";
+import type { Fetcher } from "./env.ts";
 import { setMeta } from "./meta.ts";
 import { sweepStatements } from "./reminders.ts";
 import { loadOverrides } from "./tips.ts";

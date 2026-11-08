@@ -1,5 +1,5 @@
 import { type Contest, PLATFORM, isoUtc, utcMs } from "./core/format.ts";
-import type { Env, Fetcher } from "./env.ts";
+import type { Fetcher } from "./env.ts";
 import { errorMessage } from "./errors.ts";
 import { deleteMeta, setMeta } from "./meta.ts";
 
