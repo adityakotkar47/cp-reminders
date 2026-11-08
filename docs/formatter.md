@@ -60,6 +60,7 @@ One-off tips set through `PUT /tips` are stored in D1 and take precedence over b
 
 `worker/test/core/format.test.ts` runs with the Worker tests against frozen data in `worker/test/fixtures/`: clist responses and the community's 34 manual reminders, captured on 2026-11-07.
 
-- **Golden test.** For every manual reminder, the bot's text for the same contest is compared byte for byte. Five manual posts are listed in the test as known mistakes and skipped: three contests that started at 8:15 PM but were posted with 8:00 or 8:05 PM, one post carrying another round's link, and one name typo.
-- **Selection.** Every manually posted contest is selected, and noise is not: the Div. 1 twin of a merged round, Monday Munch, Placement Prep, Kotlin Heroes practice and heuristic contests.
-- **Rules.** Sponsored-name handling, the due window, the reminder key and tip overrides.
+- **Golden tests** use the real `rules.json` and `tips.json` on purpose: they fail when a configuration change would break the community's format or skip a contest the community posts. For every manual reminder, the bot's text for the same contest is compared byte for byte, and every manually posted contest must be selected. Five manual posts are listed in the test as known mistakes and skipped: three contests that started at 8:15 PM but were posted with 8:00 or 8:05 PM, one post carrying another round's link, and one name typo.
+- **Rule tests** define their own rules and tips in the test, so they hold whatever the configuration says: name patterns, the duration limit, Div. 1 and Div. 2 merging, the due window, sponsored names, the reminder key, tip rules and overrides.
+
+The Worker's other tests take every time and limit from the configuration and from the constants exported by its modules (lease, attempts, claim size, wake debounce, snapshot age, badge threshold, length limits), so changing any of them needs no test changes.
