@@ -111,7 +111,6 @@ describe("GET /preview", () => {
   it("covers at most the next 10 reminders", async () => {
     const many = Array.from({ length: 14 }, (_, i) => ({
       ...fixtureContests.find((c) => c.href.endsWith("START264"))!,
-      id: 5000 + i,
       href: `https://www.codechef.com/START${500 + i}`,
       event: `Starters ${500 + i}`,
       start: new Date(NOW + (80 + i * 60) * 60_000).toISOString().slice(0, 19),
