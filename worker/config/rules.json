@@ -1,8 +1,7 @@
 {
   "include": {
     "Codeforces": [
-      "Codeforces Round",
-      "Global Round"
+      "."
     ],
     "Codechef": [
       "^Starters"
@@ -12,6 +11,13 @@
     ],
     "Atcoder": [
       "AtCoder Beginner Contest"
+    ]
+  },
+  "exclude": {
+    "Codeforces": [
+      "Kotlin Heroes",
+      "Unrated",
+      "April Fools"
     ]
   },
   "maxDurationHours": 5,
