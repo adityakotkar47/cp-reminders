@@ -2,7 +2,8 @@ import { createExecutionContext, createScheduledController, waitOnExecutionConte
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index.ts";
-import { NOW, mockFetch, metaValue, resetDb } from "./helpers.ts";
+import { getMeta } from "../src/meta.ts";
+import { NOW, mockFetch, resetDb } from "./helpers.ts";
 
 beforeEach(async () => {
   await resetDb();
@@ -32,7 +33,7 @@ describe("POST /tick", () => {
     expect((await call("/tick", bearer(env.ADMIN_TOKEN))).status).toBe(401);
     expect((await call("/tick?token=tick-secret", { method: "POST" })).status).toBe(401);
     expect(calls.clist).toHaveLength(0);
-    expect(await metaValue("last_tick_at")).toBeNull();
+    expect(await getMeta(env.DB, "last_tick_at")).toBeNull();
   });
 
   it("runs a tick and returns fetched, queued and woke", async () => {
@@ -43,7 +44,7 @@ describe("POST /tick", () => {
     expect(await res.json()).toMatchObject({ fetched: true, queued: 1, woke: true });
     expect(calls.clist).toHaveLength(1);
     expect(calls.github).toHaveLength(1);
-    expect(await metaValue("last_tick_at")).toBe(new Date(NOW).toISOString());
+    expect(await getMeta(env.DB, "last_tick_at")).toBe(new Date(NOW).toISOString());
   });
 
   it("rejects GET on /tick with 405", async () => {
@@ -63,6 +64,6 @@ describe("scheduled handler", () => {
     const ctx = createExecutionContext();
     await worker.scheduled!(createScheduledController({ scheduledTime: NOW, cron: "*/5 * * * *" }), env, ctx);
     await waitOnExecutionContext(ctx);
-    expect(await metaValue("last_tick_at")).toBe(new Date(NOW).toISOString());
+    expect(await getMeta(env.DB, "last_tick_at")).toBe(new Date(NOW).toISOString());
   });
 });

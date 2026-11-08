@@ -1,8 +1,9 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { isoUtc } from "../src/core/format.ts";
+import { getMeta } from "../src/meta.ts";
 import { maybeWake } from "../src/wake.ts";
-import { MIN, NOW, jsonResponse, metaValue, mockFetch, resetDb, seedReminder } from "./helpers.ts";
+import { MIN, NOW, jsonResponse, mockFetch, resetDb, seedReminder } from "./helpers.ts";
 
 beforeEach(resetDb);
 
@@ -14,7 +15,7 @@ describe("maybeWake", () => {
     const { fetcher, calls } = mockFetch();
     expect(await maybeWake(env, NOW, fetcher)).toEqual({ woke: false });
     expect(calls.github).toHaveLength(0);
-    expect(await metaValue("last_wake_at")).toBeNull();
+    expect(await getMeta(env.DB, "last_wake_at")).toBeNull();
   });
 
   it("dispatches send.yml with only a ref and records last_wake_at after a 204", async () => {
@@ -32,14 +33,14 @@ describe("maybeWake", () => {
     expect(headers.Accept).toBe("application/vnd.github+json");
     expect(headers["X-GitHub-Api-Version"]).toBe("2022-11-28");
     expect(headers["User-Agent"]).toBeTruthy();
-    expect(await metaValue("last_wake_at")).toBe(isoUtc(NOW));
+    expect(await getMeta(env.DB, "last_wake_at")).toBe(isoUtc(NOW));
   });
 
   it("treats a 200 response with a run id as success", async () => {
     await seedReminder({ key: "a" });
     const { fetcher } = mockFetch({ github: () => jsonResponse({ workflow_run_id: 1, run_url: "u", html_url: "h" }) });
     expect(await maybeWake(env, NOW, fetcher)).toEqual({ woke: true });
-    expect(await metaValue("last_wake_at")).toBe(isoUtc(NOW));
+    expect(await getMeta(env.DB, "last_wake_at")).toBe(isoUtc(NOW));
   });
 
   it.each([401, 403, 404, 422, 500, 503])("does not record last_wake_at after HTTP %i", async (status) => {
@@ -48,7 +49,7 @@ describe("maybeWake", () => {
     const result = await maybeWake(env, NOW, fetcher);
     expect(result.woke).toBe(false);
     expect(result.error).toContain(String(status));
-    expect(await metaValue("last_wake_at")).toBeNull();
+    expect(await getMeta(env.DB, "last_wake_at")).toBeNull();
   });
 
   it("does not record last_wake_at when the request itself throws", async () => {
@@ -57,7 +58,7 @@ describe("maybeWake", () => {
       throw new Error("network down");
     });
     expect(result).toEqual({ woke: false, error: "network down" });
-    expect(await metaValue("last_wake_at")).toBeNull();
+    expect(await getMeta(env.DB, "last_wake_at")).toBeNull();
   });
 
   it("debounces wakes within 4 minutes", async () => {

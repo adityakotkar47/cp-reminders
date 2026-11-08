@@ -9,12 +9,12 @@ export const STARTERS_264_KEY = "2|https://www.codechef.com/START264|2026-11-11T
 
 export const fixtureContests = upcoming.objects as unknown as Contest[];
 
-export interface Call {
+interface Call {
   url: string;
   init?: RequestInit;
 }
 
-export interface MockOptions {
+interface MockOptions {
   clist?: () => Response;
   codeforces?: () => Response;
   github?: () => Response;
@@ -43,18 +43,13 @@ export function mockFetch(options: MockOptions = {}) {
   return { fetcher, calls };
 }
 
-export async function metaValue(key: string): Promise<string | null> {
-  const row = await env.DB.prepare("SELECT v FROM meta WHERE k = ?").bind(key).first<{ v: string }>();
-  return row?.v ?? null;
-}
-
 export async function resetDb(): Promise<void> {
   await env.DB.batch(
     ["contest_snapshot", "reminders", "tip_overrides", "meta"].map((table) => env.DB.prepare(`DELETE FROM ${table}`)),
   );
 }
 
-export interface ReminderRow {
+interface ReminderRow {
   key: string;
   resource_id: number;
   href: string;

@@ -1,7 +1,8 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { ensureSnapshot } from "../src/contests.ts";
-import { MIN, NOW, fixtureContests, jsonResponse, metaValue, mockFetch, resetDb } from "./helpers.ts";
+import { getMeta } from "../src/meta.ts";
+import { MIN, NOW, fixtureContests, jsonResponse, mockFetch, resetDb } from "./helpers.ts";
 
 beforeEach(resetDb);
 
@@ -38,9 +39,9 @@ describe("ensureSnapshot: clist", () => {
     expect(row?.source).toBe("clist");
     expect(row?.fetched_at).toBe("2026-11-11T13:20:00.000Z");
     expect(Object.keys(JSON.parse(row!.payload)[0]).sort()).toEqual(["duration", "event", "href", "resource_id", "start"]);
-    expect(await metaValue("last_fetch_at")).toBe("2026-11-11T13:20:00.000Z");
-    expect(await metaValue("last_fetch_source")).toBe("clist");
-    expect(await metaValue("last_fetch_error")).toBeNull();
+    expect(await getMeta(env.DB, "last_fetch_at")).toBe("2026-11-11T13:20:00.000Z");
+    expect(await getMeta(env.DB, "last_fetch_source")).toBe("clist");
+    expect(await getMeta(env.DB, "last_fetch_error")).toBeNull();
   });
 
   it("does not refetch within 60 minutes but does after", async () => {
@@ -79,8 +80,8 @@ describe("ensureSnapshot: Codeforces fallback", () => {
     ]);
     expect(result.contests.some((c) => c.resource_id === 2)).toBe(true);
     expect((await snapshotRow())?.source).toBe("codeforces");
-    expect(await metaValue("last_fetch_source")).toBe("codeforces");
-    expect(await metaValue("last_fetch_error")).toMatch(/clist HTTP 500/);
+    expect(await getMeta(env.DB, "last_fetch_source")).toBe("codeforces");
+    expect(await getMeta(env.DB, "last_fetch_error")).toMatch(/clist HTTP 500/);
   });
 
   it("falls back when clist returns an empty list", async () => {
@@ -89,7 +90,7 @@ describe("ensureSnapshot: Codeforces fallback", () => {
     const result = await ensureSnapshot(env, NOW, fetcher);
     expect(calls.codeforces).toHaveLength(1);
     expect(result.contests.map((c) => c.href)).toEqual(["https://codeforces.com/contests/9001"]);
-    expect(await metaValue("last_fetch_error")).toMatch(/no contests/);
+    expect(await getMeta(env.DB, "last_fetch_error")).toMatch(/no contests/);
   });
 });
 
@@ -105,7 +106,7 @@ describe("ensureSnapshot: total failure", () => {
     expect(result.fetched).toBe(false);
     expect(result.contests).toHaveLength(fixtureContests.length);
     expect(await snapshotRow()).toEqual(before);
-    const error = await metaValue("last_fetch_error");
+    const error = await getMeta(env.DB, "last_fetch_error");
     expect(error).toMatch(/clist HTTP 502/);
     expect(error).toMatch(/codeforces/);
   });
@@ -120,9 +121,9 @@ describe("ensureSnapshot: total failure", () => {
   it("clears the error after a later successful fetch", async () => {
     const { fetcher: bad } = mockFetch({ clist: () => new Response("x", { status: 500 }) });
     await ensureSnapshot(env, NOW, bad);
-    expect(await metaValue("last_fetch_error")).not.toBeNull();
+    expect(await getMeta(env.DB, "last_fetch_error")).not.toBeNull();
     const { fetcher: good } = mockFetch();
     await ensureSnapshot(env, NOW + 5 * MIN, good);
-    expect(await metaValue("last_fetch_error")).toBeNull();
+    expect(await getMeta(env.DB, "last_fetch_error")).toBeNull();
   });
 });

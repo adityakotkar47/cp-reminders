@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { isoUtc } from "../src/core/format.ts";
+import { getMeta } from "../src/meta.ts";
 import { runTick } from "../src/tick.ts";
 import {
   MIN,
@@ -9,7 +10,6 @@ import {
   fixtureContests,
   getReminder,
   jsonResponse,
-  metaValue,
   mockFetch,
   resetDb,
   seedReminder,
@@ -130,7 +130,7 @@ describe("runTick: housekeeping and wake", () => {
   it("records last_tick_at", async () => {
     const { fetcher } = mockFetch();
     await runTick(env, NOW, fetcher);
-    expect(await metaValue("last_tick_at")).toBe(isoUtc(NOW));
+    expect(await getMeta(env.DB, "last_tick_at")).toBe(isoUtc(NOW));
   });
 
   it("wakes the workflow once for a new reminder and debounces the next tick", async () => {
@@ -153,7 +153,7 @@ describe("runTick: housekeeping and wake", () => {
     const first = await runTick(env, NOW, bad.fetcher);
     expect(first).toMatchObject({ queued: 1, woke: false });
     expect(first.errors.join(" ")).toMatch(/dispatch HTTP 502/);
-    expect(await metaValue("last_wake_at")).toBeNull();
+    expect(await getMeta(env.DB, "last_wake_at")).toBeNull();
 
     const good = mockFetch();
     const second = await runTick(env, NOW + MIN, good.fetcher);
