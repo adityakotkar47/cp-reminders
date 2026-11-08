@@ -161,7 +161,7 @@ The README embeds `https://img.shields.io/endpoint?url=<WORKER_URL>/badge`. The 
 1. If the snapshot is older than 60 minutes, fetch clist. On error or an empty result, fall back to the Codeforces API, which replaces only the Codeforces contests and keeps the still-upcoming contests of other platforms from the previous snapshot. `last_fetch_error` records the clist failure even when the fallback succeeds, so `/health` shows the degraded state. If both fail, keep the old snapshot.
 2. Compute due contests with `dueReminders(snapshot, rules, now)`. For each one, render the text and run `INSERT … ON CONFLICT(key) DO NOTHING` as `queued`.
 3. Expire `queued`/`claimed` rows past their deadline.
-4. If any rows are `queued` (or `claimed` with an expired lease) and `last_wake_at` is older than 4 minutes, dispatch the workflow and record `last_wake_at` after a 2xx response. The endpoint currently returns `200` with the run ID [7]. Older behaviour was `204`, and both count as success.
+4. If any rows are `queued` (or `claimed` with an expired lease) and `last_wake_at` is older than 4 minutes, dispatch the workflow and record `last_wake_at` after any 2xx response (the endpoint answers `200` with the run ID [7]).
 
 Overlapping ticks are safe: inserts are idempotent, and duplicate wakes only produce a run that finds an empty outbox.
 
