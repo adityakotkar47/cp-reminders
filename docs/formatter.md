@@ -45,7 +45,7 @@ The tip line and the blank line before it appear only when a tip applies. The fo
 | `leadMinutes` | `45` | A reminder becomes due 45 minutes before the start. |
 | `minLeadMinutes` | `10` | A reminder is not sent once the start is less than 10 minutes away. |
 
-A reminder is therefore sendable from 45 to 10 minutes before the start. How reminders are identified, including after a reschedule, is in [architecture.md](architecture.md#design-decisions).
+A reminder is therefore sendable from 45 to 10 minutes before the start. Each contest is reminded at most once, even if it is rescheduled ([architecture.md](architecture.md#design-decisions)).
 
 ## Tips
 
