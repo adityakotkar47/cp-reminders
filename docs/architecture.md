@@ -1,169 +1,176 @@
 # Architecture
 
-Contest reminders for the CP community's WhatsApp **Announcements** group, posted ~75 minutes before each contest, with no personal machine running.
+The bot posts a reminder for each selected programming contest into the Announcements group of a WhatsApp Community, about 75 minutes before the contest starts. It runs entirely on free hosted services.
 
-## Goals and constraints
+## Requirements
 
 | | |
 |---|---|
-| Functional | Post one reminder per selected contest (Codeforces, CodeChef, LeetCode, AtCoder) to exactly one chat: the community's Announcements group. Same text format as the manual posts (`docs/formatter.md`). |
-| Delivery | Effectively once: no duplicates, no silent misses. A miss must produce an alert carrying the ready-to-paste text. |
-| Cost | $0 on free tiers, no credit card. |
-| Volume | 1–4 messages/day. |
-| Platform limits | Cloudflare Workers Free: 10 ms CPU per request, 5 cron triggers per account, 100,000 requests/day [1]. D1 Free: 5M rows read/day, 100k rows written/day, 500 MB per database [2]. GitHub Actions: at most one pending run per concurrency group; a newly queued run cancels and replaces the pending one [3]. |
-| WhatsApp | No official API reaches Community announcement groups, so the sender is an unofficial linked device (whatsmeow) on a spare number. Its session keys rotate on every connection and must be persisted after every run. Only one connection may be live at a time. See `docs/research/`. |
+| What | One reminder per selected contest (Codeforces, CodeChef, LeetCode, AtCoder), in the community's message format (see [formatter.md](formatter.md)). |
+| Where | Exactly one chat: the community's Announcements group. Never any other group or person. |
+| Delivery | Effectively once: no duplicates and no silent misses. A miss raises an alert that carries the text, ready to paste by hand. |
+| Cost | $0, with no credit card. |
+| Volume | 1–4 messages a day. |
+
+## Constraints
+
+| | |
+|---|---|
+| WhatsApp | No official API can post into a Community's Announcements group ([research](research/official-whatsapp-apis.md)). The sender is therefore an unofficial linked device (whatsmeow) on a spare number. Its session keys rotate on every connection and must be saved after every run, and only one connection may be live at a time. |
+| Cloudflare Workers Free | 10 ms CPU per invocation, 5 cron triggers per account, 100,000 requests a day [1]. |
+| Cloudflare D1 Free | 5 million rows read and 100,000 rows written a day, 500 MB per database [2]. |
+| GitHub Actions | A concurrency group holds at most one pending run; a newly queued run cancels and replaces the pending one [3]. |
 
 ## Components
 
 ```mermaid
 flowchart LR
   subgraph CF[Cloudflare]
-    W[Worker: scheduler + outbox API]
-    D[(D1: reminders, snapshot, tips, meta)]
+    W[Worker: scheduler and outbox API]
+    D[(D1)]
     W <--> D
   end
-  CRON1[Workers cron */5] --> W
-  CRON2[cron-job.org */5] -->|POST /tick| W
-  W -->|GET contests| CL[clist.by API]
+  CRON[Workers cron, every 5 min] --> W
+  W -->|contests| CL[clist.by API]
   W -.->|fallback| CFAPI[Codeforces API]
-  W -->|workflow_dispatch: wake| GH
+  W -->|workflow_dispatch| GH
   subgraph GH[GitHub Actions: send.yml]
-    S[sender: Go + whatsmeow]
-    ST[(branch state: session.db.age, sent.json)]
+    S[sender: Go, whatsmeow]
+    ST[(branch state)]
     S <--> ST
   end
-  S -->|POST /outbox/claim, /outbox/ack| W
-  S -->|one message per reminder| WA[WhatsApp: Announcements group]
+  S -->|claim, ack| W
+  S -->|text| WA[WhatsApp Announcements group]
 ```
 
-| Component | Responsibility | Does not |
+| Component | Responsibility | Never |
 |---|---|---|
-| Core (`worker/src/core/`) | Pure functions: select contests, compute due reminders, render text. | Any I/O. |
-| Worker (`worker/`) | Fetch and cache contests, decide what is due, persist reminders, wake the sender, serve the outbox, expose health and a status badge. | Talk to WhatsApp. Know the target chat. |
-| Sender (`sender/`) | Claim queued reminders, deliver them to the one allowlisted chat, ack results, persist the WhatsApp session. | Decide what or when to send. Accept a destination from the network. |
-| Workflow (`.github/workflows/send.yml`) | Run the sender with secrets, serialised, and persist state. | Carry message content (the dispatch is only a wake-up). |
+| Core (`worker/src/core/`) | Pure functions: select contests, decide which reminders are due, render the text. | Performs I/O. |
+| Worker (`worker/`) | Fetches and caches contests, queues due reminders, wakes the sender, serves the outbox, reports health and a status badge. | Talks to WhatsApp or knows the target chat. |
+| Sender (`sender/`) | Claims queued reminders, posts them to the one allowed chat, reports results, saves the WhatsApp session. | Decides what to send or when, or accepts a destination over the network. |
+| Workflow (`.github/workflows/send.yml`) | Runs the sender with its secrets, one run at a time, and saves its state. | Carries message text: the dispatch is only a wake-up. |
 
-## Key design decisions
+## Design decisions
 
-1. **Outbox, pulled by the sender.** The Worker writes due reminders to a durable outbox. A dispatch only means "wake up and drain the outbox". Any run drains everything pending, so a cancelled or dropped run loses nothing, and message text never appears in workflow inputs or logs. The same API would also serve an always-on host (see [Fallback deployment](#fallback-deployment)).
-2. **D1 for state, not KV.** Dedupe and claiming need atomic, read-your-writes operations (`INSERT … ON CONFLICT DO NOTHING`, `UPDATE … RETURNING`, and `batch()`, which runs as one transaction [4]). KV changes "may take up to 60 seconds or more" to reach other locations [5], and the free tier allows 1,000 writes/day. D1's docs do not list `RETURNING`/`ON CONFLICT` explicitly, only general SQLite compatibility [6], so the Worker tests exercise both against the local D1 engine.
-3. **Natural contest identity.** A contest is identified by `(resource_id, href)`, which is the same whichever source the data came from. A reminder is identified by `resource_id|href|start`, so a rescheduled contest gets a new reminder.
-4. **Text rendered once, when the reminder is queued.** The stored text is exactly what is sent, which gives an audit trail. Placeholder names such as `Codeforces Round (Div. 2)` are usually filled in by then because the snapshot refreshes hourly.
-5. **The destination lives only with the sender.** `ANNOUNCE_JID` is a GitHub secret. The sender refuses any other chat and checks that the target is a community announcement subgroup where it is admin. A compromised Worker can at most post text to Announcements, capped per run.
-6. **Two independent guards against duplicates.** The first is D1's primary key on the reminder key. The second is the sender's local `sent.json`, which covers the gap where a message was sent but its ack was lost.
-7. **Session persisted on a single-commit orphan branch.** `state` holds `session.db.age` (age-encrypted SQLite) and `sent.json`. Each run force-pushes one commit with lease, so the repository does not grow. Writes are serialised by the workflow's concurrency group.
+1. **The sender pulls from an outbox.** The Worker writes due reminders to a durable outbox in D1, and a dispatch only means "wake up and drain it". Every run drains everything pending, so a cancelled or dropped run loses nothing, and message text never appears in workflow inputs or logs.
+2. **State lives in D1, not KV.** Deduplication and claiming need atomic, read-your-writes operations: `INSERT … ON CONFLICT DO NOTHING`, `UPDATE … RETURNING`, and `batch()`, which runs as one transaction [4]. KV changes can take 60 seconds or more to reach other locations [5], and its free tier allows 1,000 writes a day. D1's documentation promises general SQLite compatibility rather than these statements by name [6], so the Worker tests run them against the local D1 engine.
+3. **Contests have a natural identity.** A contest is `(resource_id, href)`, the same whichever source supplied it. A reminder is `resource_id|href|start`, so a rescheduled contest gets its own reminder.
+4. **Text is rendered once, when the reminder is queued.** The stored text is exactly what is sent, which makes the outbox an audit log.
+5. **Only the sender knows the destination.** `ANNOUNCE_JID` is a GitHub secret. The sender refuses any chat that is not a community announcements group in which it is admin. A compromised Worker can at most post text into Announcements, five messages per run.
+6. **Two independent guards against duplicates.** D1's primary key on the reminder key, and the sender's own `sent.json`, which covers a message that was sent but whose acknowledgement was lost.
+7. **The session lives on a single-commit branch.** Branch `state` holds `session.db.age` and `sent.json`. Each run force-pushes one commit with a lease check, so the repository does not grow, and the workflow's concurrency group serialises the writes.
 
-## Data architecture
+## Data
 
-All timestamps are stored in UTC, ISO 8601 with `Z`. IST exists only in rendered text.
+All timestamps are stored in UTC as ISO 8601 with `Z`. IST appears only in the rendered text.
 
 ### D1 tables
 
-The schema is [`worker/migrations/0001_init.sql`](../worker/migrations/0001_init.sql).
+Schema: [`worker/migrations/0001_init.sql`](../worker/migrations/0001_init.sql).
 
-| Table | Kind | Why this shape |
+| Table | Role | Shape |
 |---|---|---|
-| `contest_snapshot` | Cache, replaced wholesale | The upstream list is a cache refreshed as a unit. One row means one write per refresh, with no row-level churn. `payload` is the normalised `Contest[]` JSON. |
-| `reminders` | Ledger and outbox | One row per reminder, created when due. It is the source of truth for "already handled" and is kept indefinitely as an audit log (~1,000 rows/year). |
-| `tip_overrides` | Runtime config | One-off tips without a redeploy. They are merged over `config/tips.json` overrides. |
+| `contest_snapshot` | Cache of upcoming contests | One row, replaced as a whole on each refresh. `payload` is the normalised `Contest[]` JSON. |
+| `reminders` | Outbox and audit log | One row per reminder, created when it becomes due and kept indefinitely (about 1,000 rows a year). The source of truth for "already handled". |
+| `tip_overrides` | One-off tips | Set at runtime without a redeploy; they take precedence over the overrides in `worker/config/tips.json`. |
 | `meta` | Operational facts | `last_tick_at`, `last_fetch_at`, `last_fetch_source`, `last_fetch_error`, `last_wake_at`. |
 
-`deadline_utc` = start − `minLeadMinutes`. After it passes, a reminder is no longer worth sending.
+A reminder's `deadline_utc` is its start minus `minLeadMinutes` (10). After the deadline it is not worth sending.
 
 ### Reminder lifecycle
 
 ```mermaid
 stateDiagram-v2
-  [*] --> queued: tick, now ≥ start − lead
-  queued --> claimed: sender claims (lease 10 min)
-  claimed --> sent: ack sent
-  claimed --> queued: ack failed, attempts < 3
-  claimed --> failed: ack failed, attempts = 3
-  claimed --> queued: lease expired
-  queued --> expired: now > deadline
-  claimed --> expired: lease expired and now > deadline
-  expired --> sent: late ack "sent" with matching claimId (message was in flight)
+  [*] --> queued: tick, now ≥ start − 75 min
+  queued --> claimed: sender claims (10-minute lease)
+  claimed --> sent: ack "sent"
+  claimed --> queued: ack "failed", attempts < 3
+  claimed --> failed: ack "failed", attempts = 3
+  claimed --> queued: lease expires
+  queued --> expired: deadline passes
+  claimed --> expired: lease expires after the deadline
+  expired --> sent: ack "sent" from the claim that was in flight
   sent --> [*]
   failed --> [*]
   expired --> [*]
 ```
 
-`failed` and `expired` are terminal and alerting. They show up in `/health`, and the workflow's failure email and job summary carry the text for manual posting.
+`failed` and `expired` are terminal and count as misses: they appear in `/health` and turn the badge red, and the failed workflow run emails the owner with the text in its job summary.
 
-### Static config (repo, bundled into the Worker at deploy)
+### Configuration
 
-`worker/config/rules.json` (selection, lead times) and `worker/config/tips.json` (tip rules), documented in `docs/formatter.md`.
+`worker/config/rules.json` (which contests, lead times) and `worker/config/tips.json` (tip rules) are bundled into the Worker at deploy. Both are described in [formatter.md](formatter.md).
 
 ### Sender state (branch `state`)
 
 | File | Content |
 |---|---|
-| `session.db.age` | whatsmeow SQLite store, encrypted to the `AGE_IDENTITY` recipient. Plaintext never touches the repository. |
-| `sent.json` | Last 500 `{key, sentAt, messageId}` delivered by this sender. |
+| `session.db.age` | The whatsmeow SQLite store, encrypted with age. Plaintext never enters the repository. |
+| `sent.json` | The last 500 reminders this sender delivered: `{key, sentAt, messageId}`. |
 
 ### Secrets
 
-| Where | Name | Purpose |
+| Stored in | Name | Use |
 |---|---|---|
 | Worker | `CLIST_USERNAME`, `CLIST_API_KEY` | clist API |
-| Worker | `GH_TOKEN` | Fine-grained PAT, this repo only, Actions: read & write. Used for `workflow_dispatch`. |
-| Worker | `TICK_TOKEN` | External cron → `POST /tick` |
-| Worker | `ADMIN_TOKEN` | `GET /preview`, tip overrides |
-| Worker and GitHub | `SENDER_TOKEN` | Sender → `/outbox/*` |
-| GitHub | `WORKER_URL` | Outbox base URL |
+| Worker | `GH_TOKEN` | Fine-grained token limited to this repository with Actions read and write; dispatches `send.yml`. |
+| Worker | `TICK_TOKEN` | `POST /tick` |
+| Worker | `ADMIN_TOKEN` | `GET /preview`, `PUT /tips`, `DELETE /tips` |
+| Worker and GitHub | `SENDER_TOKEN` | `/outbox/claim`, `/outbox/ack` |
+| GitHub | `WORKER_URL` | Base URL of the Worker |
 | GitHub | `AGE_IDENTITY` | Decrypts and encrypts the session |
 | GitHub | `ANNOUNCE_JID` | The only chat the sender may post to |
 
-Each token has exactly one use, and they are compared in constant time.
+Every token has one purpose and is compared in constant time.
 
 ## Interfaces
 
 ### Worker HTTP API
 
-All bodies are JSON. Auth is `Authorization: Bearer <token>`.
+Bodies are JSON. Authentication is `Authorization: Bearer <token>`.
 
-| Method and path | Auth | Purpose |
+| Route | Auth | Behaviour |
 |---|---|---|
-| `GET /health` | none | `{lastTickAt, lastFetchAt, lastFetchSource, lastFetchError, queued, claimed, failed24h, expired24h}`. No secrets and no message text. |
-| `GET /badge` | none | The same health, summarised as a [shields.io endpoint badge](https://shields.io/badges/endpoint-badge): `{schemaVersion: 1, label: "bot", message, color}`. See [Status badge](#status-badge). |
-| `POST /tick` | `TICK_TOKEN` | Runs one tick. Returns `{fetched, queued, woke, errors}`. |
-| `GET /preview` | `ADMIN_TOKEN` | Next 10 reminders: send time (IST) and rendered text. |
-| `PUT /tips` | `ADMIN_TOKEN` | `{href, tip}` upserts a one-off tip. An empty `tip` suppresses the tip for that contest. |
-| `DELETE /tips` | `ADMIN_TOKEN` | `{href}` |
-| `POST /outbox/claim` | `SENDER_TOKEN` | `{claimId}` returns `{items: [{key, text, startUtc, deadlineUtc}]}`, at most 5 per claim. It atomically moves `queued`, and `claimed` with an expired lease, to `claimed` under `claimId`, and skips past-deadline rows. |
-| `POST /outbox/ack` | `SENDER_TOKEN` | `{claimId, results: [{key, status: "sent" \| "failed", messageId?, error?}]}` applies the transitions above. Acks for a different `claimId` are ignored. |
-
-### Workflow trigger
-
-`POST /repos/{owner}/{repo}/actions/workflows/send.yml/dispatches` with `{"ref": "main"}`. There are no inputs. `send.yml` has no `schedule` trigger, so GitHub's 60-day inactivity auto-disable does not apply to it [8].
+| `GET /health` | none | `{lastTickAt, lastFetchAt, lastFetchSource, lastFetchError, queued, claimed, failed24h, expired24h}`. Contains no secrets and no message text. |
+| `GET /badge` | none | The health as a [shields.io endpoint badge](https://shields.io/badges/endpoint-badge) (see [Status badge](#status-badge)). |
+| `POST /tick` | `TICK_TOKEN` | Runs one tick and returns `{fetched, queued, woke, errors}`. |
+| `GET /preview` | `ADMIN_TOKEN` | The next 10 reminders with their send time in IST and rendered text. |
+| `PUT /tips` | `ADMIN_TOKEN` | `{href, tip}` sets a one-off tip; an empty `tip` suppresses the tip for that contest. |
+| `DELETE /tips` | `ADMIN_TOKEN` | `{href}` removes a one-off tip. |
+| `POST /outbox/claim` | `SENDER_TOKEN` | `{claimId}` → `{items: [{key, text, startUtc, deadlineUtc}]}`, at most 5. Atomically moves `queued` rows, and `claimed` rows whose lease has expired, to `claimed` under `claimId`. Rows past their deadline are not returned. |
+| `POST /outbox/ack` | `SENDER_TOKEN` | `{claimId, results: [{key, status: "sent" \| "failed", messageId?, error?}]}` applies the lifecycle transitions. Results for rows held by another claim are ignored. |
 
 ### Status badge
 
-`GET /badge` derives one state from the health values, first match wins:
+`GET /badge` returns `{schemaVersion: 1, label: "bot", message, color}` with `Cache-Control: max-age=300`. The first matching state wins:
 
 | State | Condition | `message` | `color` |
 |---|---|---|---|
-| down | no tick for more than 15 minutes, or never ticked | `no tick for 23m` / `never ticked` | `red` |
+| down | no tick in the last 15 minutes, or no tick ever | `no tick for 23m` / `never ticked` | `red` |
 | failing | `failed24h + expired24h > 0` | `2 missed in 24h` | `red` |
 | degraded | `lastFetchError` is set | `degraded: clist` | `yellow` |
 | healthy | otherwise | `ok · tick 3m ago` | `brightgreen` |
 
-The README embeds `https://img.shields.io/endpoint?url=<WORKER_URL>/badge`. The response is computed from D1 on each request and carries `Cache-Control: max-age=300`; shields.io applies its own minimum cache on top.
+The README shows it through `https://img.shields.io/endpoint?url=<WORKER_URL>/badge` [9].
+
+### Workflow dispatch
+
+`POST /repos/{owner}/{repo}/actions/workflows/send.yml/dispatches` with `{"ref": "main"}` and no inputs. GitHub answers `200` with the run ID [7]; the Worker treats any 2xx as success. `send.yml` has no `schedule` trigger, so GitHub's 60-day inactivity rule, which applies to scheduled workflows, does not disable it [8].
 
 ### Sender CLI
 
-`wa keygen`, `wa pair`, `wa groups`, `wa drain`. Details are in `docs/sender.md`.
+`wa keygen`, `wa pair`, `wa groups` and `wa drain`, described in [sender.md](sender.md).
 
 ## Flows
 
-### Tick (every 5 minutes, from two independent triggers)
+### Tick (Workers cron, every 5 minutes)
 
-1. If the snapshot is older than 60 minutes, fetch clist. On error or an empty result, fall back to the Codeforces API, which replaces only the Codeforces contests and keeps the still-upcoming contests of other platforms from the previous snapshot. `last_fetch_error` records the clist failure even when the fallback succeeds, so `/health` shows the degraded state. If both fail, keep the old snapshot.
-2. Compute due contests with `dueReminders(snapshot, rules, now)`. For each one, render the text and run `INSERT … ON CONFLICT(key) DO NOTHING` as `queued`.
-3. Expire `queued`/`claimed` rows past their deadline.
-4. If any rows are `queued` (or `claimed` with an expired lease) and `last_wake_at` is older than 4 minutes, dispatch the workflow and record `last_wake_at` after any 2xx response (the endpoint answers `200` with the run ID [7]).
+1. If the contest snapshot is older than 60 minutes, fetch clist. If clist fails or returns nothing, fetch the Codeforces API instead: its contests replace the Codeforces ones in the snapshot, and the other platforms' upcoming contests are kept. `last_fetch_error` records the clist failure even when the fallback succeeds. If both fail, the existing snapshot stays.
+2. For every contest whose reminder is due, render the text and insert it as `queued` with `INSERT … ON CONFLICT(key) DO NOTHING`.
+3. Mark `queued` and `claimed` rows past their deadline as `expired`.
+4. If rows are waiting (`queued`, or `claimed` with an expired lease) and the last wake was more than 4 minutes ago, dispatch `send.yml` and record `last_wake_at` on a 2xx response.
 
-Overlapping ticks are safe: inserts are idempotent, and duplicate wakes only produce a run that finds an empty outbox.
+`POST /tick` runs the same steps, so an external scheduler such as cron-job.org can act as a second trigger. Overlapping ticks are harmless: inserts are idempotent, and an extra wake only produces a run that finds an empty outbox.
 
 ### Send run
 
@@ -173,49 +180,49 @@ sequenceDiagram
   participant S as sender
   participant W as Worker
   participant WA as WhatsApp
-  GH->>S: start (concurrency: wa-session)
+  GH->>S: start (concurrency group wa-session)
   S->>W: POST /outbox/claim {claimId}
-  W-->>S: items (maybe empty)
+  W-->>S: items (possibly none)
   alt no items
     S-->>GH: exit 0 without connecting to WhatsApp
   else items
-    S->>S: decrypt session, random jitter ≤ 90 s
-    S->>WA: connect, verify target is announce subgroup and we are admin
-    loop each item not in sent.json
-      S->>WA: send text to ANNOUNCE_JID
-      S->>S: append sent.json
+    S->>S: decrypt session, wait a random 0–90 s
+    S->>WA: connect, check the target is Announcements and we are admin
+    loop each item not already in sent.json
+      S->>WA: send the text to ANNOUNCE_JID
+      S->>S: record it in sent.json
     end
+    S->>S: disconnect, encrypt and save the session
     S->>W: POST /outbox/ack {claimId, results}
-    S->>S: disconnect, encrypt session
   end
-  GH->>GH: force-push state branch (always, even on failure)
+  GH->>GH: force-push branch state (also after a failure)
 ```
 
-## Failure modes
+## Failure handling
 
 | Failure | Effect | Handling |
 |---|---|---|
-| clist down or rate-limited | No fresh data | Codeforces fallback. The stale snapshot stays usable for already-known contests. Visible in `/health`. |
-| Worker cron delayed or skipped | Late tick | The due window (lead 75 → deadline 10 min) tolerates ticks being late by up to an hour. cron-job.org hitting `POST /tick` is an optional second trigger; it is not configured yet. The badge turns red after 15 minutes without a tick. |
-| Dispatch fails (GitHub API) | Sender not woken | `last_wake_at` is not updated, so the next tick retries. |
-| Run cancelled while pending | None | The outbox still holds the rows, and the next run drains them. |
-| Two runs at once | Prevented | Concurrency group `wa-session`. A single live socket is also a ban-risk requirement. |
-| Sent but ack lost | Possible duplicate | `sent.json` check, then ack as sent on the next claim. If the deadline passes before that claim, the row ends `expired` although the message was delivered; `sent.json` on the `state` branch is the record of truth for delivery. |
-| WhatsApp logged out, or the device was removed | Nothing can be sent | The sender fails the job: GitHub emails, and the job summary lists the claimed texts. Rows return to `queued` and expire at the deadline. Fix with `wa pair`. |
-| Contest rescheduled | Start changes | New key gives a new reminder. A reminder already sent for the old time is not retracted. |
-| Placeholder name at queue time | Generic name posted | Accepted. The snapshot refreshes hourly, so this is rare. |
-| Spare number banned | Total outage | Main number owns the community. Re-pair a new number as admin. |
+| clist down or rate-limited | No fresh contest data | Codeforces fallback; contests already in the snapshot are still reminded. Shown by `/health` and a yellow badge. |
+| Cron tick late or skipped | Reminder delayed | A reminder stays sendable from 75 to 10 minutes before the start, so ticks can be up to an hour late. The badge turns red after 15 minutes without a tick. |
+| Dispatch fails | Sender not woken | `last_wake_at` stays unchanged, so the next tick dispatches again. |
+| Pending run cancelled by a newer one | None | The outbox keeps the rows; the next run drains them. |
+| Two runs at once | Prevented | Concurrency group `wa-session`. One live connection is also what WhatsApp expects of a device. |
+| Sent, but the ack is lost | Risk of a duplicate | The next run finds the key in `sent.json` and acks it as sent without resending. If the deadline passes first, the row ends `expired` although the message was delivered; `sent.json` is the record of delivery. |
+| WhatsApp session logged out or removed | Nothing can be sent | The run fails, GitHub emails the owner, and the job summary lists the texts. Rows return to `queued` and expire at their deadline. Re-pair with `wa pair`. |
+| Contest rescheduled | Start time changes | The new start gives a new key and a new reminder. A reminder already sent for the old time stays. |
+| Placeholder contest name | Generic name posted | The snapshot refreshes hourly, so names are usually final by the time a reminder is due. |
+| Spare number banned | No reminders | The owner's main number owns the community; pair another number and make it admin. |
 
 ## Capacity
 
-| Resource | Per day | Free limit |
+| Resource | Use per day | Free limit |
 |---|---|---|
-| Worker requests | ~300 cron ticks, plus API and badge calls (badge cached ≥ 5 min) | 100,000 |
-| Worker CPU per tick | low single-digit ms; JSON parse of ~30 contests and SQL round trips are I/O | 10 ms |
-| D1 writes | ~24 snapshot, ~4 reminders × ~3 transitions, ~300 meta | 100,000 |
-| D1 reads | ~2,000 | 5,000,000 |
-| clist requests | ≤ 24 | 10/min |
-| GitHub Actions minutes | ~4 runs × ~2 min (empty runs ~30 s) | 2,000/month (private repo) |
+| Worker requests | 288 cron ticks, plus sender and badge requests | 100,000 |
+| Worker CPU per tick | Parsing about 30 contests and rendering a few messages; fetches and SQL are I/O, not CPU | 10 ms |
+| D1 rows written | about 24 snapshot refreshes, a few reminder transitions, 288 tick timestamps | 100,000 |
+| D1 rows read | about 2,000 | 5,000,000 |
+| clist requests | at most 24 | 10 a minute |
+| GitHub Actions | 1–4 runs of under a minute each | 2,000 minutes a month (private repository) |
 
 ## Repository layout
 
@@ -223,20 +230,20 @@ sequenceDiagram
 worker/              Cloudflare Worker (pnpm workspace package)
   config/            rules.json, tips.json
   migrations/        D1 schema
-  src/core/          pure core: contest selection and message formatting
-  src/               scheduler, outbox API, health and badge
+  src/core/          contest selection and message formatting
+  src/               scheduler, outbox API, health, badge
+  test/              Worker tests in the Workers runtime with a local D1
   test/core/         golden tests against the manual reminder history
-  test/fixtures/     frozen clist data and manual history (captured 2026-11-07)
-  test/              Worker tests (Workers runtime, local D1)
+  test/fixtures/     frozen clist data and manual reminders from 2026-11-07
 sender/              Go module: cmd/wa, internal/{drain,outbox,state,wa}
-.github/workflows/   send.yml (wake → drain), ci.yml (tests on push)
+.github/workflows/   send.yml (drain the outbox), ci.yml (checks on push)
 docs/                architecture, formatter, scheduler, sender, workflow
-docs/research/       the research behind the design decisions
+docs/research/       research behind the design
 ```
 
-## Fallback deployment
+## Alternative host
 
-If short-lived sessions on GitHub-hosted runners prove unreliable, the sender runs as a long-lived process on an Oracle Always Free VM and calls `/outbox/claim` every minute. Nothing else changes: the wake dispatch is disabled, and the API, data model and Worker stay as they are.
+The outbox API does not depend on GitHub Actions. A sender with a polling loop, running permanently on an always-free VM such as Oracle Cloud's, could call `/outbox/claim` every minute instead of being woken by a dispatch; the Worker, data model and API would stay the same. The sender has no polling mode today.
 
 ## References
 
@@ -247,5 +254,5 @@ If short-lived sessions on GitHub-hosted runners prove unreliable, the sender ru
 5. How KV works: https://developers.cloudflare.com/kv/concepts/how-kv-works/
 6. D1 SQL statements: https://developers.cloudflare.com/d1/sql-api/sql-statements/
 7. Create a workflow dispatch event: https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event
-8. Disabling workflows (only scheduled workflows are auto-disabled after 60 days without activity in public repos): https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-workflow-runs/disabling-and-enabling-a-workflow
+8. Disabling and enabling a workflow: https://docs.github.com/en/actions/managing-workflow-runs-and-deployments/managing-workflow-runs/disabling-and-enabling-a-workflow
 9. shields.io endpoint badge: https://shields.io/badges/endpoint-badge
