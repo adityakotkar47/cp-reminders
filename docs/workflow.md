@@ -90,7 +90,7 @@ Issues and pull requests with no activity for 7 days are labelled `stale` and cl
 
 ## Dependabot
 
-`.github/dependabot.yml` checks weekly for updates to:
+`.github/dependabot.yml` checks every Saturday at 06:00 India Standard Time (`Asia/Kolkata`) for updates to:
 
 | Ecosystem | Directory | Covers |
 |---|---|---|
